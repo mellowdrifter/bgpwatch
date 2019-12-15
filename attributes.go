@@ -265,7 +265,15 @@ func getIPv4Prefix(b *bytes.Reader, mask uint8) net.IP {
 		io.CopyN(prefix, b, 4)
 	}
 
-	return net.IP(prefix.Bytes())
+	// IPv4 net.IP requires all bytes to have values, including zeros
+	return fillv4(prefix.Bytes())
+}
+
+// TODO: test cases
+func fillv4(b []byte) net.IP {
+	fill := make([]byte, 4-len(b))
+	b = append(b, fill...)
+	return net.IP(b)
 }
 
 // BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
