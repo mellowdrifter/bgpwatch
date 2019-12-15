@@ -59,6 +59,7 @@ func main() {
 		mutex: sync.RWMutex{},
 	}
 	serv.listen(conf)
+	go serv.clean()
 	serv.start(conf)
 }
 
@@ -87,7 +88,7 @@ func getRid(srid *string) (bgpid, error) {
 	for i := 0; i < 4; i++ {
 		num, err := strconv.ParseInt(s[i], 10, 16)
 		if err != nil {
-			return rid, nil
+			return rid, err
 		}
 		rid[i] = byte(uint8(num))
 	}
@@ -117,6 +118,12 @@ func (s *bgpWatchServer) start(conf config) {
 			go peer.peerWorker()
 		}
 	}
+}
+
+// TODO: Make this work, and remove old clients
+func (s *bgpWatchServer) clean() {
+	time.Sleep(5 * time.Second)
+	log.Printf("I have %d clients connected\n", len(s.peers))
 }
 
 // accept adds a new client to the current list of clients being served.
@@ -171,7 +178,7 @@ func (s *bgpWatchServer) remove(p *peer) {
 
 }
 
-// Make this better somehow
+// TODO: Maximum size ould be more than 4k if implementing that RFC that allows 65K
 func getMessage(c net.Conn) ([]byte, error) {
 	// 4096 is the max BGP packet size
 	buffer := make([]byte, 4096)

@@ -151,8 +151,6 @@ func uint32ToByte(i uint32) []byte {
 	return []byte{byte(a), byte(b), byte(c), byte(d)}
 }
 
-// How to look after each parameter in turn?
-// Could be dodgy and encode cap 2 and size in each...
 func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 	var param []byte
 
@@ -169,9 +167,7 @@ func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 		param = append(param, uint16ToByte(asn)...)
 	}
 
-	// Need to check which AF the peer is actually using!
-	// AFI 0 SAFI 0 are IPv4, so if not filled in this is what is sent back :/
-	// This might be fine. Advertise all but we'll negotiate on what the other sends.
+	// TODO: Only advertise the AF family that the peer actually sends us
 	ip4 := createIPv4Cap()
 	param = append(param, ip4...)
 	ip6 := createIPv6Cap()
@@ -218,7 +214,6 @@ type msgNotification struct {
 	Subcode uint8
 }
 
-// this is just for End-Of-RIB. Needs more work!
 type msgUpdate struct {
 	Withdraws  uint16
 	AttrLength twoByteLength

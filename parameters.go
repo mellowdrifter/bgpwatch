@@ -48,8 +48,8 @@ func decodeOptionalParameters(param *[]byte) parameters {
 			break
 		}
 
-		// Pass all capabilties to be decoded. Depending on vendor, there could be 1 or more
-		// capability per optional parameter.
+		// Pass all capabilties to be decoded. Depending on vendor,
+		// there could be 1 or more capability per optional parameter.
 		c := make([]byte, p.Length)
 		io.ReadFull(r, c)
 		decodeCapability(c, &par)

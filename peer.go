@@ -59,7 +59,7 @@ func (p *peer) peerWorker() {
 		case open:
 			p.HandleOpen()
 			p.createOpen()
-			// Following should go outside of the switch statement once the rest are done
+			// TODO: Following should go outside of the switch statement once the rest are done
 			p.encodeOutgoing()
 
 		case keepalive:
@@ -72,6 +72,10 @@ func (p *peer) peerWorker() {
 
 			// output and dump that update
 			p.logUpdate()
+
+		case notification:
+			p.handleNotification()
+			return
 
 		default:
 			log.Printf("Unknown BGP message inbound: %#v\n", p.in)
@@ -115,15 +119,13 @@ func (p *peer) HandleOpen() {
 
 }
 
-// TODO: Still not doing anything with this...
 func (p *peer) handleNotification() {
-	log.Println("Received a notify message")
-	// Handle this better. Minimum is code and subcode. Could be more
 	var n msgNotification
 	binary.Read(p.in, binary.BigEndian, &n)
 
-	log.Printf("Notification code is %d with subcode %d\n", n.Code, n.Subcode)
+	log.Printf("Notification received: code is %d with subcode %d\n", n.Code, n.Subcode)
 	log.Println("Closing session")
+	// TODO: This closes the session, but it does not yet remove the session
 	p.conn.Close()
 
 }
@@ -137,7 +139,6 @@ func (p *peer) handleUpdate() {
 	// If IPv4 EoR, exit early
 	if u.Withdraws == 0 && u.AttrLength.toUint16() == 0 {
 		p.mutex.Lock()
-		// TODO: How to deal with IPv6 EoR?
 		p.eor = true
 		pa.v4EoR = true
 		p.prefixes = &pa
@@ -196,8 +197,24 @@ func (p *peer) logUpdate() {
 	}
 
 	p.mutex.RLock()
-	log.Println("******************************")
-	log.Printf("ATTR: %+v\n", p.prefixes)
+	log.Println("**********START**********")
+	if len(p.prefixes.v4prefixes) != 0 {
+		log.Printf("Received the following IPv4 prefixes:")
+		for _, prefix := range p.prefixes.v4prefixes {
+			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+		}
+	}
+
+	if len(p.prefixes.v6prefixes) != 0 {
+		log.Printf("Received the following IPv6 prefixes:")
+		for _, prefix := range p.prefixes.v6prefixes {
+			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+		}
+		log.Printf("With the following next-hops:")
+		for _, nh := range p.prefixes.v6NextHops {
+			log.Printf("%v\n", nh)
+		}
+	}
 
 	if p.prefixes.attr != nil {
 		log.Printf("Origin is %d\n", p.prefixes.attr.origin)
@@ -215,13 +232,6 @@ func (p *peer) logUpdate() {
 			log.Printf("Has the following large communities: %v\n", p.prefixes.attr.largeCommunities)
 		}
 	}
-	if len(p.prefixes.v4prefixes) != 0 {
-		log.Printf("IPv4 prefixes received: %+v\n", p.prefixes.v4prefixes)
-	}
-	if len(p.prefixes.v6prefixes) != 0 {
-		log.Printf("IPv6 prefixes received: %+v\n", p.prefixes.v6prefixes)
-		log.Printf("IPv6 Next-Hops are %+v\n", p.prefixes.v6NextHops)
-	}
 
 	// TODO: prefixes withdrawn
 
@@ -235,7 +245,7 @@ func (p *peer) logUpdate() {
 	}
 
 	p.mutex.RUnlock()
-	log.Println("******************************")
+	log.Println("***********END***********")
 
 	// Empty out the prefixes field
 	p.mutex.Lock()
