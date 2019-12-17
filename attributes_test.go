@@ -372,3 +372,242 @@ func TestDecodePathAttributes(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatASPathformatASPath(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []asnSegment
+		want  string
+	}{
+		{
+			desc:  "No AS-PATH",
+			input: []asnSegment{},
+			want:  "",
+		},
+		{
+			desc: "One AS SEQ",
+			input: []asnSegment{
+				asnSegment{
+					Type: 2,
+					ASN:  98765,
+				},
+			},
+			want: "98765",
+		},
+		{
+			desc: "Two AS SEQ",
+			input: []asnSegment{
+				asnSegment{
+					Type: 2,
+					ASN:  98765,
+				},
+				asnSegment{
+					Type: 2,
+					ASN:  123,
+				},
+			},
+			want: "98765 123",
+		},
+		{
+			desc: "Two AS SEQ and One AS-SET",
+			input: []asnSegment{
+				asnSegment{
+					Type: 2,
+					ASN:  98765,
+				},
+				asnSegment{
+					Type: 2,
+					ASN:  123,
+				},
+				asnSegment{
+					Type: 1,
+					ASN:  345,
+				},
+			},
+			want: "98765 123 { 345 }",
+		},
+		{
+			desc: "Two AS SEQ and Two AS-SET",
+			input: []asnSegment{
+				asnSegment{
+					Type: 2,
+					ASN:  98765,
+				},
+				asnSegment{
+					Type: 2,
+					ASN:  123,
+				},
+				asnSegment{
+					Type: 1,
+					ASN:  345,
+				},
+				asnSegment{
+					Type: 1,
+					ASN:  153489,
+				},
+			},
+			want: "98765 123 { 345 153489 }",
+		},
+		{
+			desc: "Two AS-SET only",
+			input: []asnSegment{
+				asnSegment{
+					Type: 1,
+					ASN:  345,
+				},
+				asnSegment{
+					Type: 1,
+					ASN:  153489,
+				},
+			},
+			want: "{ 345 153489 }",
+		},
+	}
+	for _, test := range tests {
+
+		got := formatASPath(&test.input)
+		if got != test.want {
+			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
+		}
+	}
+}
+
+func TestFormatCommunities(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []community
+		want  string
+	}{
+		{
+			desc:  "No Community",
+			input: []community{},
+			want:  "",
+		},
+		{
+			desc: "One Community",
+			input: []community{
+				community{
+					High: 64500,
+					Low:  12345,
+				},
+			},
+			want: "64500:12345",
+		},
+		{
+			desc: "Two Communities",
+			input: []community{
+				community{
+					High: 64500,
+					Low:  12345,
+				},
+				community{
+					High: 64501,
+					Low:  456,
+				},
+			},
+			want: "64500:12345 64501:456",
+		},
+		{
+			desc: "No High",
+			input: []community{
+				community{
+					Low: 12345,
+				},
+			},
+			want: "0:12345",
+		},
+		{
+			desc: "No Low",
+			input: []community{
+				community{
+					High: 64501,
+				},
+			},
+			want: "64501:0",
+		},
+	}
+	for _, test := range tests {
+
+		got := formatCommunities(&test.input)
+		if got != test.want {
+			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
+		}
+	}
+}
+
+func TestFormatLargeCommunities(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []largeCommunity
+		want  string
+	}{
+		{
+			desc:  "No Community",
+			input: []largeCommunity{},
+			want:  "",
+		},
+		{
+			desc: "One Community",
+			input: []largeCommunity{
+				largeCommunity{
+					Admin: 9876543,
+					High:  64500,
+					Low:   12345,
+				},
+			},
+			want: "9876543:64500:12345",
+		},
+		{
+			desc: "Two Communities",
+			input: []largeCommunity{
+				largeCommunity{
+					Admin: 321654987,
+					High:  64500,
+					Low:   12345,
+				},
+				largeCommunity{
+					Admin: 321654987,
+					High:  64501,
+					Low:   456,
+				},
+			},
+			want: "321654987:64500:12345 321654987:64501:456",
+		},
+		{
+			desc: "No High",
+			input: []largeCommunity{
+				largeCommunity{
+					Admin: 321654987,
+					Low:   12345,
+				},
+			},
+			want: "321654987:0:12345",
+		},
+		{
+			desc: "No Low",
+			input: []largeCommunity{
+				largeCommunity{
+					Admin: 321654987,
+					High:  64501,
+				},
+			},
+			want: "321654987:64501:0",
+		},
+		{
+			desc: "Admin onlu",
+			input: []largeCommunity{
+				largeCommunity{
+					Admin: 321654987,
+				},
+			},
+			want: "321654987:0:0",
+		},
+	}
+	for _, test := range tests {
+
+		got := formatLargeCommunities(&test.input)
+		if got != test.want {
+			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
+		}
+	}
+}

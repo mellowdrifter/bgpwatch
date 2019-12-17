@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 	"net"
 )
 
@@ -103,8 +102,8 @@ func (p *peer) encodeOutgoing() {
 	// Set size
 	b := p.out.Bytes()
 	setSizeOfMessage(&b)
-	log.Printf("Will encode the following...")
-	log.Printf("%#v\n", b)
+	//log.Printf("Will encode the following...")
+	//log.Printf("%#v\n", b)
 	binary.Write(p.conn, binary.BigEndian, b)
 }
 
@@ -134,7 +133,6 @@ func getOpenASN(asn uint16) []byte {
 		return []byte{0x5b, 0xa0}
 	}
 	return uint16ToByte(asn)
-
 }
 
 func uint16ToByte(i uint16) []byte {

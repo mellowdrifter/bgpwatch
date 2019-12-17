@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -38,8 +41,23 @@ type flagType struct {
 	Code  uint8
 }
 
+type origin uint8
+
+// TODO: Where should this go?
+func (o *origin) string() string {
+	switch uint8(*o) {
+	case 0:
+		return "IGP"
+	case 1:
+		return "EGP"
+	case 2:
+		return "INCOMPLETE"
+	}
+	return ""
+}
+
 type pathAttr struct {
-	origin           uint8
+	origin           origin
 	aspath           []asnSegment
 	nextHopv4        string
 	med              uint32
@@ -146,8 +164,8 @@ func isExtended(b byte) bool {
 	return res == 16
 }
 
-func decodeOrigin(b *bytes.Buffer) uint8 {
-	var o uint8
+func decodeOrigin(b *bytes.Buffer) origin {
+	var o origin
 	binary.Read(b, binary.BigEndian, &o)
 
 	return o
@@ -407,4 +425,51 @@ func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
 	pa.v4prefixes = addrs
 
 	return &pa
+}
+
+// Return a properly formatted AS-PATH. Sequnce AS-PATH
+// are in front with spaces between, while the AS-SET is
+// in curly braces at the end.
+func formatASPath(asns *[]asnSegment) string {
+	var sequence, set []int
+	var b strings.Builder
+
+	for _, asn := range *asns {
+		if asn.Type == 2 {
+			sequence = append(sequence, int(asn.ASN))
+			continue
+		}
+		if asn.Type == 1 {
+			set = append(set, int(asn.ASN))
+		}
+	}
+
+	for _, v := range sequence {
+		b.WriteString(strconv.Itoa(v) + " ")
+	}
+	if len(set) > 0 {
+		b.WriteString("{ ")
+		for _, v := range set {
+			b.WriteString(strconv.Itoa(v) + " ")
+		}
+		b.WriteString("}")
+	}
+
+	return strings.TrimSpace(b.String())
+}
+
+func formatCommunities(com *[]community) string {
+	var b strings.Builder
+	for _, v := range *com {
+		b.WriteString(fmt.Sprintf("%d:%d ", v.High, v.Low))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatLargeCommunities(com *[]largeCommunity) string {
+	var b strings.Builder
+	for _, v := range *com {
+		b.WriteString(fmt.Sprintf("%d:%d:%d ", v.Admin, v.High, v.Low))
+	}
+	return strings.TrimSpace(b.String())
 }

@@ -197,16 +197,25 @@ func (p *peer) logUpdate() {
 	}
 
 	p.mutex.RLock()
-	log.Println("**********START**********")
+	log.Println("")
 	if len(p.prefixes.v4prefixes) != 0 {
-		log.Printf("Received the following IPv4 prefixes:")
+		if len(p.prefixes.v4prefixes) == 1 {
+			log.Printf("Received the following IPv4 prefix:")
+		} else {
+			log.Printf("Received the following IPv4 prefixes:")
+
+		}
 		for _, prefix := range p.prefixes.v4prefixes {
 			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
 		}
 	}
 
 	if len(p.prefixes.v6prefixes) != 0 {
-		log.Printf("Received the following IPv6 prefixes:")
+		if len(p.prefixes.v6prefixes) == 1 {
+			log.Printf("Received the following IPv6 prefix:")
+		} else {
+			log.Printf("Received the following IPv6 prefixes:")
+		}
 		for _, prefix := range p.prefixes.v6prefixes {
 			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
 		}
@@ -217,8 +226,11 @@ func (p *peer) logUpdate() {
 	}
 
 	if p.prefixes.attr != nil {
-		log.Printf("Origin is %d\n", p.prefixes.attr.origin)
-		log.Printf("ASPATH is %v\n", p.prefixes.attr.aspath)
+		log.Printf("Origin: %s\n", p.prefixes.attr.origin.string())
+		if len(p.prefixes.attr.aspath) != 0 {
+			path := formatASPath(&p.prefixes.attr.aspath)
+			log.Printf("AS-path: %s\n", path)
+		}
 		if p.prefixes.attr.atomic {
 			log.Printf("Has the atomic aggregates set")
 		}
@@ -226,10 +238,12 @@ func (p *peer) logUpdate() {
 			log.Printf("As aggregate ASN as %v\n", p.prefixes.attr.agAS)
 		}
 		if len(p.prefixes.attr.communities) > 0 {
-			log.Printf("Has the following communities: %v\n", p.prefixes.attr.communities)
+			comm := formatCommunities(&p.prefixes.attr.communities)
+			log.Printf("Communities: %s\n", comm)
 		}
 		if len(p.prefixes.attr.largeCommunities) > 0 {
-			log.Printf("Has the following large communities: %v\n", p.prefixes.attr.largeCommunities)
+			comm := formatLargeCommunities(&p.prefixes.attr.largeCommunities)
+			log.Printf("Large Communities: %s\n", comm)
 		}
 	}
 
@@ -245,7 +259,7 @@ func (p *peer) logUpdate() {
 	}
 
 	p.mutex.RUnlock()
-	log.Println("***********END***********")
+	log.Println("")
 
 	// Empty out the prefixes field
 	p.mutex.Lock()
