@@ -277,6 +277,7 @@ func TestDecodeMPReachNLRI(t *testing.T) {
 					Mask:   56,
 				},
 			},
+			// TODO: Will iBGP always send link-local? Why am I seeing it here?
 			wantNH: []string{
 				"::",
 				"fe80::a00:27ff:fe3b:be83",
@@ -594,7 +595,7 @@ func TestFormatLargeCommunities(t *testing.T) {
 			want: "321654987:64501:0",
 		},
 		{
-			desc: "Admin onlu",
+			desc: "Admin only",
 			input: []largeCommunity{
 				largeCommunity{
 					Admin: 321654987,

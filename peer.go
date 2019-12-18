@@ -3,11 +3,19 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"time"
+)
+
+var (
+	bgpMarker = []byte{
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	}
 )
 
 type peer struct {
@@ -44,18 +52,14 @@ func (p *peer) peerWorker() {
 		// Create a reader from that byte slice and insert into the peer struct
 		p.in = bytes.NewReader(msg)
 
-		// marker should be checked and removed via the getMessage function
-		var m marker
-		binary.Read(p.in, binary.BigEndian, &m)
-
 		// Grab the header
-		header, err := p.getHeader()
+		header, err := p.getType()
 		if err != nil {
 			log.Printf("Unable to decode header: %v\n", err)
 			return
 		}
 
-		switch header.Type {
+		switch header {
 		case open:
 			p.HandleOpen()
 			p.createOpen()
@@ -78,17 +82,48 @@ func (p *peer) peerWorker() {
 			return
 
 		default:
-			log.Printf("Unknown BGP message inbound: %#v\n", p.in)
-			//io.CopyN(ioutil.Discard, p.in, int64(header.Length))
+			log.Printf("Unknown BGP message inbound: %+v\n", p.in)
 		}
 	}
 }
 
-func (p *peer) getHeader() (header, error) {
-	var h header
-	binary.Read(p.in, binary.BigEndian, &h)
+// TODO: Maximum size could be more than 4k if implementing that RFC that allows 65K
+func getMessage(c net.Conn) ([]byte, error) {
 
-	return h, nil
+	// Grab the first 18 bytes. 16 for the marker and 2 for the size.
+	header := make([]byte, 18)
+	_, err := io.ReadFull(c, header)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for BGP marker
+	if bytes.Compare(header[:16], bgpMarker) != 0 {
+		return nil, fmt.Errorf("Packet is not a BGP packet as does not have the marker present")
+	}
+
+	// len will be the remainder of the packet, minus the 18 bytes already taken above.
+	len := getMessageLength(header[16:]) - 18
+	buffer := make([]byte, len)
+
+	// Read in the rest of the packet and return.
+	_, err = io.ReadFull(c, buffer)
+	if err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
+// BGP packet length is two fields long
+func getMessageLength(b []byte) int {
+	return int(b[0])*256 + int(b[1])
+}
+
+func (p *peer) getType() (uint8, error) {
+	var t uint8
+	binary.Read(p.in, binary.BigEndian, &t)
+
+	return t, nil
 }
 
 func (p *peer) HandleKeepalive() {
@@ -107,7 +142,6 @@ func (p *peer) HandleOpen() {
 
 	// Read parameters into new buffer
 	pbuffer := make([]byte, int(o.ParamLen))
-	// TODO: errors
 	io.ReadFull(p.in, pbuffer)
 
 	// Grab the ASN and Hold Time.

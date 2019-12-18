@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -176,30 +175,4 @@ func (s *bgpWatchServer) remove(p *peer) {
 	// Don't worry about errors as it's mostly because it's already closed.
 	p.conn.Close()
 
-}
-
-// TODO: Maximum size ould be more than 4k if implementing that RFC that allows 65K
-func getMessage(c net.Conn) ([]byte, error) {
-	// 4096 is the max BGP packet size
-	buffer := make([]byte, 4096)
-	// 19 is the minimum size (keepalive)
-	_, err := io.ReadFull(c, buffer[:19])
-	if err != nil {
-		return nil, err
-	}
-
-	// Add a check to ensure the BGP marker is present, else return an error
-	// In fact we could just remove the marker if all good as I don't really care about it!
-
-	// These calculations should go into a function
-	length := int(buffer[16])*256 + int(buffer[17])
-
-	// Check for errors on these readfulls
-	_, err = io.ReadFull(c, buffer[19:length])
-	if err != nil {
-		return nil, err
-	}
-
-	// Only the bytes of interest should be returned
-	return buffer[:length], nil
 }

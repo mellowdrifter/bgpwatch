@@ -61,11 +61,6 @@ type marker struct {
 	_ uint64
 }
 
-type header struct {
-	Length uint16
-	Type   uint8
-}
-
 type msgOpen struct {
 	Version  uint8
 	ASN      uint16

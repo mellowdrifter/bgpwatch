@@ -236,7 +236,7 @@ func decodeCommunities(b *bytes.Buffer, len int64) []community {
 }
 
 func decodeLargeCommunities(b *bytes.Buffer, len int64) []largeCommunity {
-	// Each large community takes 4 bytes
+	// Each large community takes 12 bytes
 	var communities = make([]largeCommunity, 0, len/12)
 	for {
 		if b.Len() == 0 {
@@ -284,6 +284,7 @@ func getIPv4Prefix(b *bytes.Reader, mask uint8) net.IP {
 	}
 
 	// IPv4 net.IP requires all bytes to have values, including zeros
+	// TODO: But so does IPv6? Do the same as what I'm doing there?
 	return fillv4(prefix.Bytes())
 }
 
