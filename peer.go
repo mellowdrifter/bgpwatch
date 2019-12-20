@@ -88,6 +88,7 @@ func (p *peer) peerWorker() {
 }
 
 // TODO: Maximum size could be more than 4k if implementing that RFC that allows 65K
+// TODO: TEST
 func getMessage(c net.Conn) ([]byte, error) {
 
 	// Grab the first 18 bytes. 16 for the marker and 2 for the size.
@@ -115,6 +116,7 @@ func getMessage(c net.Conn) ([]byte, error) {
 }
 
 // BGP packet length is two fields long
+// TODO: TEST
 func getMessageLength(b []byte) int {
 	return int(b[0])*256 + int(b[1])
 }
@@ -264,6 +266,9 @@ func (p *peer) logUpdate() {
 		if len(p.prefixes.attr.aspath) != 0 {
 			path := formatASPath(&p.prefixes.attr.aspath)
 			log.Printf("AS-path: %s\n", path)
+		}
+		if p.prefixes.attr.originator != nil {
+			log.Printf("Originator ID: %s\n", p.prefixes.attr.originator.String())
 		}
 		if p.prefixes.attr.atomic {
 			log.Printf("Has the atomic aggregates set")

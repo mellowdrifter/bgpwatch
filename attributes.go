@@ -13,23 +13,21 @@ import (
 )
 
 const (
-	// tc is Type Code
-	tcOrigin         = 1
-	tcASPath         = 2
-	tcNextHop        = 3
-	tcMED            = 4
-	tcLPref          = 5
-	tcAtoAgg         = 6
-	tcAggregator     = 7
-	tcCommunity      = 8
-	tcMPReachNLRI    = 14
-	tcMPUnreachNLRI  = 15
-	tcLargeCommunity = 32
-
-	// origin codes
-	igp        = 0
-	egp        = 1
-	incomplete = 2
+	// Type Codes
+	tcOrigin          = 1
+	tcASPath          = 2
+	tcNextHop         = 3
+	tcMED             = 4
+	tcLPref           = 5
+	tcAtoAgg          = 6
+	tcAggregator      = 7
+	tcCommunity       = 8
+	tcOriginator      = 9
+	tcClusterList     = 10
+	tcMPReachNLRI     = 14
+	tcExtendCommunity = 16
+	tcMPUnreachNLRI   = 15
+	tcLargeCommunity  = 32
 )
 
 type attrHeader struct {
@@ -57,19 +55,21 @@ func (o *origin) string() string {
 }
 
 type pathAttr struct {
-	origin           origin
-	aspath           []asnSegment
-	nextHopv4        string
-	med              uint32
-	localPref        uint32
-	atomic           bool
-	agAS             uint32
-	agOrigin         net.IP
-	communities      []community
-	largeCommunities []largeCommunity
-	nextHopsv6       []string
-	ipv6NLRI         []v6Addr
-	v6EoR            bool
+	origin            origin
+	aspath            []asnSegment
+	nextHopv4         string
+	med               uint32
+	localPref         uint32
+	atomic            bool
+	agAS              uint32
+	agOrigin          net.IP
+	originator        net.IP
+	communities       []community
+	largeCommunities  []largeCommunity
+	extendCommunities []extendCommunity
+	nextHopsv6        []string
+	ipv6NLRI          []v6Addr
+	v6EoR             bool
 }
 
 type community struct {
@@ -81,6 +81,9 @@ type largeCommunity struct {
 	Admin uint32
 	High  uint32
 	Low   uint32
+}
+
+type extendCommunity struct {
 }
 
 type prefixAttributes struct {
@@ -150,6 +153,10 @@ func decodePathAttributes(attr []byte) *pathAttr {
 			pa.communities = decodeCommunities(buf, len)
 		case tcLargeCommunity:
 			pa.largeCommunities = decodeLargeCommunities(buf, len)
+		case tcExtendCommunity:
+			pa.extendCommunities = decodeExtendedCommunities(buf, len)
+		case tcOriginator:
+			pa.originator = decodeOriginator(buf)
 
 		default:
 			log.Printf("Type Code %d is not yet implemented", ah.Type.Code)
@@ -171,6 +178,15 @@ func decodeOrigin(b *bytes.Buffer) origin {
 	return o
 }
 
+// Originator is set by the RR when a route is reflected.
+func decodeOriginator(b *bytes.Buffer) net.IP {
+	o := bytes.NewBuffer(make([]byte, 0, 4))
+	io.Copy(o, b)
+	return net.IP(o.Bytes())
+}
+
+// TODO: The actual IPv4 address should be a generic function. There
+// are numerous capabilities that require an IP address or router ID.
 func decodeIPv4NextHop(b *bytes.Buffer) string {
 	ip := bytes.NewBuffer(make([]byte, 0, 4))
 	io.Copy(ip, b)
@@ -247,6 +263,15 @@ func decodeLargeCommunities(b *bytes.Buffer, len int64) []largeCommunity {
 		communities = append(communities, comm)
 	}
 	return communities
+}
+
+// TODO: Extended communities can hold many different things so this function itself
+// can end up very complicated. Maybe just dump the bytes? A bit nasty so maybe not.
+// For now just null0 the update
+// rfc4360
+func decodeExtendedCommunities(b *bytes.Buffer, len int64) []extendCommunity {
+	io.CopyN(ioutil.Discard, b, len)
+	return nil
 }
 
 func decodeIPv4NLRI(b *bytes.Reader) []v4Addr {
