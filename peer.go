@@ -267,14 +267,18 @@ func (p *peer) logUpdate() {
 			path := formatASPath(&p.prefixes.attr.aspath)
 			log.Printf("AS-path: %s\n", path)
 		}
-		if p.prefixes.attr.originator != nil {
-			log.Printf("Originator ID: %s\n", p.prefixes.attr.originator.String())
+		if p.prefixes.attr.originator != "" {
+			log.Printf("Originator ID: %s\n", p.prefixes.attr.originator)
+		}
+		if len(p.prefixes.attr.clusterList) > 0 {
+			list := formatClusterList(&p.prefixes.attr.clusterList)
+			log.Printf("Cluster List: %v\n", list)
 		}
 		if p.prefixes.attr.atomic {
 			log.Printf("Has the atomic aggregates set")
 		}
 		if p.prefixes.attr.agAS != 0 {
-			log.Printf("As aggregate ASN as %v\n", p.prefixes.attr.agAS)
+			log.Printf("AS aggregate ASN as %v\n", p.prefixes.attr.agAS)
 		}
 		if len(p.prefixes.attr.communities) > 0 {
 			comm := formatCommunities(&p.prefixes.attr.communities)

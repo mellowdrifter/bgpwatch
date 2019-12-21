@@ -63,7 +63,8 @@ type pathAttr struct {
 	atomic            bool
 	agAS              uint32
 	agOrigin          net.IP
-	originator        net.IP
+	originator        string
+	clusterList       []string
 	communities       []community
 	largeCommunities  []largeCommunity
 	extendCommunities []extendCommunity
@@ -136,7 +137,7 @@ func decodePathAttributes(attr []byte) *pathAttr {
 				pa.aspath = append(pa.aspath, decodeASPath(buf)...)
 			}
 		case tcNextHop:
-			pa.nextHopv4 = decodeIPv4NextHop(buf)
+			pa.nextHopv4 = decode4byteIPv4(buf)
 		case tcMED:
 			pa.med = decode4ByteNumber(buf)
 		case tcLPref:
@@ -156,7 +157,9 @@ func decodePathAttributes(attr []byte) *pathAttr {
 		case tcExtendCommunity:
 			pa.extendCommunities = decodeExtendedCommunities(buf, len)
 		case tcOriginator:
-			pa.originator = decodeOriginator(buf)
+			pa.originator = decode4byteIPv4(buf)
+		case tcClusterList:
+			pa.clusterList = decodeClusterList(buf, len)
 
 		default:
 			log.Printf("Type Code %d is not yet implemented", ah.Type.Code)
@@ -178,30 +181,25 @@ func decodeOrigin(b *bytes.Buffer) origin {
 	return o
 }
 
-// Originator is set by the RR when a route is reflected.
-func decodeOriginator(b *bytes.Buffer) net.IP {
-	o := bytes.NewBuffer(make([]byte, 0, 4))
-	io.Copy(o, b)
-	return net.IP(o.Bytes())
-}
-
-// TODO: The actual IPv4 address should be a generic function. There
-// are numerous capabilities that require an IP address or router ID.
-func decodeIPv4NextHop(b *bytes.Buffer) string {
+func decode4byteIPv4(b *bytes.Buffer) string {
 	ip := bytes.NewBuffer(make([]byte, 0, 4))
-	io.Copy(ip, b)
+	io.CopyN(ip, b, 4)
+	fmt.Printf("%#v\n", ip)
+
 	return net.IP(ip.Bytes()).String()
 }
 
-func decodeIPv6NextHop(b *bytes.Buffer) string {
+func decode16byteIPv6(b *bytes.Buffer) string {
 	ip := bytes.NewBuffer(make([]byte, 0, 16))
-	io.Copy(ip, b)
+	io.CopyN(ip, b, 16)
+
 	return net.IP(ip.Bytes()).String()
 }
 
 func decode4ByteNumber(b *bytes.Buffer) uint32 {
 	var n uint32
 	binary.Read(b, binary.BigEndian, &n)
+
 	return n
 }
 
@@ -272,6 +270,18 @@ func decodeLargeCommunities(b *bytes.Buffer, len int64) []largeCommunity {
 func decodeExtendedCommunities(b *bytes.Buffer, len int64) []extendCommunity {
 	io.CopyN(ioutil.Discard, b, len)
 	return nil
+}
+
+// Cluster List is a series of Cluster IDs.
+// RFC4456 - Section 8
+func decodeClusterList(b *bytes.Buffer, len int64) []string {
+	var cluster []string
+	ids := int(len / 4)
+	for i := 0; i < ids; i++ {
+		cluster = append(cluster, decode4byteIPv4(b))
+		fmt.Println(cluster)
+	}
+	return cluster
 }
 
 func decodeIPv4NLRI(b *bytes.Reader) []v4Addr {
@@ -387,12 +397,12 @@ func decodeMPReachNLRI(b *bytes.Buffer) ([]v6Addr, []string) {
 
 	nh := bytes.NewBuffer(make([]byte, 0, 16))
 	io.CopyN(nh, b, 16)
-	nextHops = append(nextHops, decodeIPv6NextHop(nh))
+	nextHops = append(nextHops, decode16byteIPv6(nh))
 
 	if nhLen == 32 {
 		llnh := bytes.NewBuffer(make([]byte, 0, 16))
 		io.CopyN(llnh, b, 16)
-		nextHops = append(nextHops, decodeIPv6NextHop(llnh))
+		nextHops = append(nextHops, decode16byteIPv6(llnh))
 	}
 
 	// Ignore one byte SNPA
@@ -498,4 +508,12 @@ func formatLargeCommunities(com *[]largeCommunity) string {
 		b.WriteString(fmt.Sprintf("%d:%d:%d ", v.Admin, v.High, v.Low))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func formatClusterList(cluster *[]string) string {
+	var b strings.Builder
+	for _, v := range *cluster {
+		b.WriteString(fmt.Sprintf("%s, ", v))
+	}
+	return strings.TrimRight(b.String(), ", ")
 }

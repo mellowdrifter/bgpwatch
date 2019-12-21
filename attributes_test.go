@@ -473,6 +473,35 @@ func TestFormatASPathformatASPath(t *testing.T) {
 	}
 }
 
+func TestDecodeClusterList(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []byte
+		len   int64
+		want  []string
+	}{
+		{
+			desc:  "One cluster ID",
+			input: []byte{0x0a, 0x01, 0x01, 0x01},
+			len:   4,
+			want:  []string{"10.1.1.1"},
+		},
+		{
+			desc:  "Two cluster IDs",
+			input: []byte{0x0a, 0x01, 0x01, 0x01, 0x0a, 0x01, 0x02, 0x03},
+			len:   8,
+			want:  []string{"10.1.1.1", "10.1.2.3"},
+		},
+	}
+	for _, test := range tests {
+		buf := bytes.NewBuffer(test.input)
+		got := decodeClusterList(buf, test.len)
+		if !cmp.Equal(got, test.want) {
+			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
+		}
+	}
+}
+
 func TestFormatCommunities(t *testing.T) {
 	tests := []struct {
 		desc  string
@@ -607,6 +636,42 @@ func TestFormatLargeCommunities(t *testing.T) {
 	for _, test := range tests {
 
 		got := formatLargeCommunities(&test.input)
+		if got != test.want {
+			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
+		}
+	}
+}
+
+func TestFormatClusterList(t *testing.T) {
+	tests := []struct {
+		desc  string
+		input []string
+		want  string
+	}{
+		{
+			desc:  "No Cluster",
+			input: []string{},
+			want:  "",
+		},
+		{
+			desc: "One ID",
+			input: []string{
+				"10.1.1.1",
+			},
+			want: "10.1.1.1",
+		},
+		{
+			desc: "Two IDs",
+			input: []string{
+				"10.1.1.1",
+				"10.2.2.2",
+			},
+			want: "10.1.1.1, 10.2.2.2",
+		},
+	}
+	for _, test := range tests {
+
+		got := formatClusterList(&test.input)
 		if got != test.want {
 			t.Errorf("Test (%s): got %s, want %s", test.desc, got, test.want)
 		}
