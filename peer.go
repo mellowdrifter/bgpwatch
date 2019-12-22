@@ -169,11 +169,25 @@ func (p *peer) handleNotification() {
 // Handle update messages. IPv6 updates are encoded in attributes unlike IPv4.
 func (p *peer) handleUpdate() {
 	var pa prefixAttributes
-	var u msgUpdate
-	binary.Read(p.in, binary.BigEndian, &u)
 
-	// If IPv4 EoR, exit early
-	if u.Withdraws == 0 && u.AttrLength.toUint16() == 0 {
+	var withdraw uint16
+	binary.Read(p.in, binary.BigEndian, &withdraw)
+
+	// IPv4 withdraws are done here
+	if withdraw != 0 {
+		wbuf := make([]byte, withdraw)
+		io.ReadFull(p.in, wbuf)
+		p.mutex.Lock()
+		p.prefixes = decodeIPv4Withdraws(wbuf)
+		p.mutex.Unlock()
+		return
+	}
+
+	var attrLength twoByteLength
+	binary.Read(p.in, binary.BigEndian, &attrLength)
+
+	// Zero withdraws and zero attributes means IPv4 End-of-RIB
+	if withdraw == 0 && attrLength.toUint16() == 0 {
 		p.mutex.Lock()
 		p.eor = true
 		pa.v4EoR = true
@@ -182,22 +196,13 @@ func (p *peer) handleUpdate() {
 		return
 	}
 
-	if u.AttrLength.toUint16() == 0 {
-		return
-	}
-
-	// IPv4 withdraws are done here
-	if u.Withdraws != 0 {
-		wbuf := make([]byte, u.Withdraws)
-		io.ReadFull(p.in, wbuf)
-		p.mutex.Lock()
-		p.prefixes = decodeIPv4Withdraws(wbuf)
-		p.mutex.Unlock()
+	// TODO: Do I still need another check here?
+	if attrLength.toUint16() == 0 {
 		return
 	}
 
 	// Drain all path attributes into a new buffer to decode.
-	abuf := make([]byte, u.AttrLength.toUint16())
+	abuf := make([]byte, attrLength.toUint16())
 	io.ReadFull(p.in, abuf)
 
 	// decode attributes
@@ -223,6 +228,7 @@ func (p *peer) handleUpdate() {
 	p.mutex.Unlock()
 }
 
+//TODO: Not showing IPv4 Next-Hop
 func (p *peer) logUpdate() {
 	// If waiting for EoR and not yet received, output nothing
 	if p.weor && !p.eor {
@@ -261,11 +267,15 @@ func (p *peer) logUpdate() {
 		}
 	}
 
+	// TODO: Do a better check here. Attributes not nil if IPv6 EoR, or routes withdrawn.
 	if p.prefixes.attr != nil {
 		log.Printf("Origin: %s\n", p.prefixes.attr.origin.string())
 		if len(p.prefixes.attr.aspath) != 0 {
 			path := formatASPath(&p.prefixes.attr.aspath)
 			log.Printf("AS-path: %s\n", path)
+		}
+		if p.prefixes.attr.localPref != 0 {
+			log.Printf("Local Preference: %d\n", p.prefixes.attr.localPref)
 		}
 		if p.prefixes.attr.originator != "" {
 			log.Printf("Originator ID: %s\n", p.prefixes.attr.originator)
@@ -290,7 +300,28 @@ func (p *peer) logUpdate() {
 		}
 	}
 
-	// TODO: prefixes withdrawn
+	if len(p.prefixes.v4Withdraws) != 0 {
+		if len(p.prefixes.v4Withdraws) == 1 {
+			log.Printf("Withdrawn the following IPv4 prefix:")
+		} else {
+			log.Printf("Withdrawn the following IPv4 prefixes:")
+
+		}
+		for _, prefix := range p.prefixes.v4Withdraws {
+			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+		}
+	}
+
+	if len(p.prefixes.v6Withdraws) != 0 {
+		if len(p.prefixes.v6Withdraws) == 1 {
+			log.Printf("Withdrawn the following IPv6 prefix:")
+		} else {
+			log.Printf("Withdrawn the following IPv6 prefixes:")
+		}
+		for _, prefix := range p.prefixes.v6Withdraws {
+			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+		}
+	}
 
 	if p.prefixes.v4EoR {
 		log.Printf("IPv4 End-of-Rib received")

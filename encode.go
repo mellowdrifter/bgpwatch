@@ -207,11 +207,6 @@ type msgNotification struct {
 	Subcode uint8
 }
 
-type msgUpdate struct {
-	Withdraws  uint16
-	AttrLength twoByteLength
-}
-
 func (t twoByteLength) toUint16() uint16 {
 	return uint16(int(t[0])*256 + int(t[1]))
 }

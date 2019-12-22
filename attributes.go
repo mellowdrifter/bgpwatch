@@ -108,9 +108,13 @@ type extendCommunity struct {
 }
 
 type prefixAttributes struct {
-	attr       *pathAttr
-	v4prefixes []v4Addr
-	v6prefixes []v6Addr
+	attr        *pathAttr
+	v4prefixes  []v4Addr
+	v6prefixes  []v6Addr
+	v4Withdraws []v4Addr
+	v6Withdraws []v6Addr
+	// TODO: Fill this in
+	v4NextHop  string
 	v6NextHops []string
 	v4EoR      bool
 	v6EoR      bool
@@ -340,16 +344,11 @@ func getIPv4Prefix(b *bytes.Reader, mask uint8) net.IP {
 		io.CopyN(prefix, b, 4)
 	}
 
-	// IPv4 net.IP requires all bytes to have values, including zeros
-	// TODO: But so does IPv6? Do the same as what I'm doing there?
-	return fillv4(prefix.Bytes())
-}
+	for prefix.Len() < 4 {
+		prefix.WriteByte(0)
+	}
 
-// TODO: test cases
-func fillv4(b []byte) net.IP {
-	fill := make([]byte, 4-len(b))
-	b = append(b, fill...)
-	return net.IP(b)
+	return net.IP(prefix.Bytes())
 }
 
 // BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
@@ -462,7 +461,6 @@ func decodeIPv6NLRI(b *bytes.Buffer) []v6Addr {
 	return addrs
 }
 
-// TODO: this is awful. This is the same as decode IPv4 NLRI. Use the same?
 func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
 	r := bytes.NewReader(wd)
 	var pa prefixAttributes
@@ -480,7 +478,7 @@ func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
 			Prefix: getIPv4Prefix(r, mask),
 		})
 	}
-	pa.v4prefixes = addrs
+	pa.v4Withdraws = addrs
 
 	return &pa
 }
