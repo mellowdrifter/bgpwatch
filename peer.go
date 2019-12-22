@@ -232,8 +232,8 @@ func (p *peer) logUpdate() {
 		return
 	}
 
+	log.Println("----------------------")
 	p.mutex.RLock()
-	log.Println("")
 	if len(p.prefixes.v4prefixes) != 0 {
 		if len(p.prefixes.v4prefixes) == 1 {
 			log.Printf("Received the following IPv4 prefix:")
@@ -302,7 +302,6 @@ func (p *peer) logUpdate() {
 	}
 
 	p.mutex.RUnlock()
-	log.Println("")
 
 	// Empty out the prefixes field
 	p.mutex.Lock()

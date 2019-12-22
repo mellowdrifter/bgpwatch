@@ -30,6 +30,26 @@ const (
 	tcLargeCommunity  = 32
 )
 
+var (
+	// Some attributes here were deprecated a while back, while others
+	// were added in RFC8093
+	isDeprecated = map[uint8]bool{
+		11:  true,
+		12:  true,
+		13:  true,
+		19:  true,
+		20:  true,
+		21:  true,
+		28:  true,
+		30:  true,
+		31:  true,
+		129: true,
+		241: true,
+		242: true,
+		243: true,
+	}
+)
+
 type attrHeader struct {
 	Type flagType
 }
@@ -162,7 +182,11 @@ func decodePathAttributes(attr []byte) *pathAttr {
 			pa.clusterList = decodeClusterList(buf, len)
 
 		default:
-			log.Printf("Type Code %d is not yet implemented", ah.Type.Code)
+			log.Printf("Type Code %d is not implemented", ah.Type.Code)
+			io.CopyN(ioutil.Discard, buf, len)
+		}
+		if isDeprecated[ah.Type.Code] {
+			log.Printf("Type Code %d is deprecated", ah.Type.Code)
 		}
 	}
 	return &pa
@@ -184,7 +208,6 @@ func decodeOrigin(b *bytes.Buffer) origin {
 func decode4byteIPv4(b *bytes.Buffer) string {
 	ip := bytes.NewBuffer(make([]byte, 0, 4))
 	io.CopyN(ip, b, 4)
-	fmt.Printf("%#v\n", ip)
 
 	return net.IP(ip.Bytes()).String()
 }
@@ -279,7 +302,6 @@ func decodeClusterList(b *bytes.Buffer, len int64) []string {
 	ids := int(len / 4)
 	for i := 0; i < ids; i++ {
 		cluster = append(cluster, decode4byteIPv4(b))
-		fmt.Println(cluster)
 	}
 	return cluster
 }
