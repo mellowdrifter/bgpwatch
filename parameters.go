@@ -22,7 +22,7 @@ const (
 )
 
 type parameters struct {
-	ASN32        uint32
+	ASN32        [4]byte
 	Refresh      bool
 	AddPath      []addr
 	AddrFamilies []addr
@@ -69,7 +69,6 @@ func decodeCapability(cap []byte, p *parameters) {
 		var cap msgCapability
 		binary.Read(r, binary.BigEndian, &cap)
 
-		// Setting 20 here as a random number which should be big enough for any capability?
 		buf := bytes.NewBuffer(make([]byte, 0, cap.Length))
 		switch cap.Code {
 
@@ -117,9 +116,11 @@ func decodeCapability(cap []byte, p *parameters) {
 }
 
 // parameter 65 is 4-octet AS support
-func decode4OctetAS(b *bytes.Buffer) uint32 {
-	var ASN uint32
+func decode4OctetAS(b *bytes.Buffer) [4]byte {
+	var ASN [4]byte
 	binary.Read(b, binary.BigEndian, &ASN)
+	log.Printf("%#v\n", ASN)
+	log.Println(ASN)
 	return ASN
 }
 
@@ -149,4 +150,13 @@ func decodeAddPath(b *bytes.Buffer) (addr, bool) {
 
 	}
 	return addr{}, false
+}
+
+// TODO These should be methods attached to the struct
+func isIPv4Unicast(a addr) bool {
+	return a.AFI == 1 && a.SAFI == 1
+}
+
+func isIPv6Unicast(a addr) bool {
+	return a.AFI == 2 && a.SAFI == 1
 }

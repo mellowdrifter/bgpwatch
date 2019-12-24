@@ -47,18 +47,13 @@ type twoByteLength [2]byte
 type v4Addr struct {
 	Mask   uint8
 	Prefix net.IP
+	ID     uint32
 }
 
 type v6Addr struct {
 	Mask   uint8
 	Prefix net.IP
-}
-
-type marker struct {
-	//This 16-octet field is included for compatibility
-	// It MUST be set to all ones.
-	_ uint64
-	_ uint64
+	ID     uint32
 }
 
 type msgOpen struct {
@@ -111,6 +106,7 @@ func setSizeOfMessage(b *[]byte) {
 func (p *peer) createOpen() {
 	getMarker(p.out)
 	// Need to convert both ASN and Holdtime to [2]byte. Another function?
+	// First two bytes zero as they will be updated to contain the length later
 	p.out.Write([]byte{0, 0, open, bgpVersion})
 	p.out.Write(getOpenASN(p.asn))
 	p.out.Write(uint16ToByte(p.holdtime))
@@ -144,6 +140,7 @@ func uint32ToByte(i uint32) []byte {
 	return []byte{byte(a), byte(b), byte(c), byte(d)}
 }
 
+//TODO: Buggy, test!
 func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 	var param []byte
 
@@ -153,18 +150,36 @@ func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 	// Always send refresh and 4byte support
 	param = append(param, byte(capRefresh), 0)
 	param = append(param, byte(cap4Byte), 4)
-	if p.ASN32 != 0 {
-		param = append(param, byte(p.ASN32))
+	// TODO: Test this both on real router and test code
+	if isASN32(p.ASN32) {
+		param = append(param, p.ASN32[:]...)
 	} else {
 		param = append(param, 0, 0)
 		param = append(param, uint16ToByte(asn)...)
 	}
 
-	// TODO: Only advertise the AF family that the peer actually sends us
-	ip4 := createIPv4Cap()
-	param = append(param, ip4...)
-	ip6 := createIPv6Cap()
-	param = append(param, ip6...)
+	// Only advertise the AF family that the peer sends us
+	for _, a := range p.AddrFamilies {
+		if isIPv4Unicast(a) {
+			ip4 := createIPv4Cap()
+			param = append(param, ip4...)
+		}
+		if isIPv6Unicast(a) {
+			ip6 := createIPv6Cap()
+			param = append(param, ip6...)
+		}
+	}
+
+	for _, a := range p.AddPath {
+		if isIPv4Unicast(a) {
+			ip4 := createIPv4AddPath()
+			param = append(param, ip4...)
+		}
+		if isIPv6Unicast(a) {
+			ip6 := createIPv6AddPath()
+			param = append(param, ip6...)
+		}
+	}
 
 	// Insert size of parameters. This is the total size minus the parameter type and size bytes
 	param[1] = byte(len(param) - 2)
@@ -181,6 +196,18 @@ func createIPv4Cap() []byte {
 func createIPv6Cap() []byte {
 	// Unknown numbers!
 	return []byte{capMpBgp, 4, 0, 2, 0, 1}
+}
+
+func createIPv4AddPath() []byte {
+	// TODO: All these should be in a single function and documented.
+	// Last digit is 1 because I only support receiving multiple paths
+	return []byte{capAddPath, 4, 0, 1, 1, 1}
+}
+
+func createIPv6AddPath() []byte {
+	// TODO: All these should be in a single function and documented.
+	// Last digit is 1 because I only support receiving multiple paths
+	return []byte{capAddPath, 4, 0, 2, 1, 1}
 }
 
 type parameterHeader struct {
@@ -213,4 +240,10 @@ func (t twoByteLength) toUint16() uint16 {
 
 func (t twoByteLength) toInt64() int64 {
 	return int64(t.toUint16())
+}
+
+// If ASN field is all zeros, there is no 32bit ASN
+func isASN32(asn [4]byte) bool {
+	empty := [4]byte{}
+	return !bytes.Equal(empty[:], asn[:])
 }

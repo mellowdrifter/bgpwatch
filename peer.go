@@ -174,6 +174,7 @@ func (p *peer) handleUpdate() {
 	binary.Read(p.in, binary.BigEndian, &withdraw)
 
 	// IPv4 withdraws are done here
+	// TODO: IPv4 Path ID withdraws?
 	if withdraw != 0 {
 		wbuf := make([]byte, withdraw)
 		io.ReadFull(p.in, wbuf)
@@ -206,7 +207,7 @@ func (p *peer) handleUpdate() {
 	io.ReadFull(p.in, abuf)
 
 	// decode attributes
-	pa.attr = decodePathAttributes(abuf)
+	pa.attr = decodePathAttributes(abuf, p.param.AddPath)
 
 	// IPv6 updates are done via attributes. Only pass the remainder of the buffer to decodeIPv4NLRI if
 	// there are no IPv6 updates in the attributes.
@@ -214,7 +215,7 @@ func (p *peer) handleUpdate() {
 		// dump the rest of the update message into a buffer to use for NLRI
 		// It is possible to work this out as well... needed for a copy.
 		// for now just read the last of the in buffer :(
-		pa.v4prefixes = decodeIPv4NLRI(p.in)
+		pa.v4prefixes = decodeIPv4NLRI(p.in, p.param.AddPath)
 		// TODO: What about withdraws???
 	} else {
 		// Copy certain attributes over to upper struct
@@ -250,6 +251,11 @@ func (p *peer) logUpdate() {
 		for _, prefix := range p.prefixes.v4prefixes {
 			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
 		}
+		// TODO: This only checks a single path for it's ID
+		// But each route could have this ID set, and it could be unique.
+		if p.prefixes.v4prefixes[0].ID != 0 {
+			log.Printf("With Path ID: %d\n", p.prefixes.v4prefixes[0].ID)
+		}
 	}
 
 	if len(p.prefixes.v6prefixes) != 0 {
@@ -260,6 +266,11 @@ func (p *peer) logUpdate() {
 		}
 		for _, prefix := range p.prefixes.v6prefixes {
 			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+		}
+		// TODO: This only checks a single path for it's ID
+		// But each route could have this ID set, and it could be unique.
+		if p.prefixes.v6prefixes[0].ID != 0 {
+			log.Printf("With Path ID: %d\n", p.prefixes.v6prefixes[0].ID)
 		}
 		log.Printf("With the following next-hops:")
 		for _, nh := range p.prefixes.v6NextHops {

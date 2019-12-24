@@ -120,7 +120,8 @@ type prefixAttributes struct {
 	v6EoR      bool
 }
 
-func decodePathAttributes(attr []byte) *pathAttr {
+// AddPath is just shoved in here. Fix this
+func decodePathAttributes(attr []byte, ap []addr) *pathAttr {
 	r := bytes.NewReader(attr)
 
 	var pa pathAttr
@@ -171,7 +172,7 @@ func decodePathAttributes(attr []byte) *pathAttr {
 		case tcAggregator:
 			pa.agAS, pa.agOrigin = decodeAggregator(buf)
 		case tcMPReachNLRI:
-			pa.ipv6NLRI, pa.nextHopsv6 = decodeMPReachNLRI(buf)
+			pa.ipv6NLRI, pa.nextHopsv6 = decodeMPReachNLRI(buf, ap)
 		case tcMPUnreachNLRI:
 			pa.v6EoR = decodeMPUnreachNLRI(buf, 3)
 		case tcCommunity:
@@ -310,11 +311,18 @@ func decodeClusterList(b *bytes.Buffer, len int64) []string {
 	return cluster
 }
 
-func decodeIPv4NLRI(b *bytes.Reader) []v4Addr {
+// TODO: ap = AddPath AFs. Should really be a bool instead.
+func decodeIPv4NLRI(b *bytes.Reader, ap []addr) []v4Addr {
 	var addrs []v4Addr
 	for {
 		if b.Len() == 0 {
 			break
+		}
+
+		var id uint32
+		// YUCK
+		if len(ap) != 0 {
+			binary.Read(b, binary.BigEndian, &id)
 		}
 
 		var mask uint8
@@ -323,9 +331,36 @@ func decodeIPv4NLRI(b *bytes.Reader) []v4Addr {
 		addrs = append(addrs, v4Addr{
 			Mask:   mask,
 			Prefix: getIPv4Prefix(b, mask),
+			ID:     id,
 		})
 	}
 
+	return addrs
+}
+
+// TODO: As above
+func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) []v6Addr {
+	var addrs []v6Addr
+	for {
+		if b.Len() == 0 {
+			break
+		}
+
+		var id uint32
+		// YUCK
+		if len(ap) != 0 {
+			binary.Read(b, binary.BigEndian, &id)
+		}
+
+		var mask uint8
+		binary.Read(b, binary.BigEndian, &mask)
+
+		addrs = append(addrs, v6Addr{
+			Mask:   mask,
+			Prefix: getIPv6Prefix(b, mask),
+			ID:     id,
+		})
+	}
 	return addrs
 }
 
@@ -397,7 +432,7 @@ func getIPv6Prefix(b *bytes.Buffer, mask uint8) net.IP {
 	return net.IP(prefix.Bytes())
 }
 
-func decodeMPReachNLRI(b *bytes.Buffer) ([]v6Addr, []string) {
+func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string) {
 	// AFI/SAFI - For now I only IPv6 Unicast
 	var afi uint16
 	var safi uint8
@@ -412,6 +447,7 @@ func decodeMPReachNLRI(b *bytes.Buffer) ([]v6Addr, []string) {
 	// If the next-hop length is 32 bytes, we have both a public and link-local
 	// If the next-hop length is only 16 bytes, the next-hop should be public only
 	// But if the actual next-hop is link-local, the initial next-hop is :: ?
+	// TODO: check multivendors. Why is link local sent on iBGP? What about eBGP local and remote?
 	var nhLen uint8
 	binary.Read(b, binary.BigEndian, &nhLen)
 	log.Println(nhLen)
@@ -430,7 +466,7 @@ func decodeMPReachNLRI(b *bytes.Buffer) ([]v6Addr, []string) {
 	io.CopyN(ioutil.Discard, b, 1)
 
 	// Pass the remainder of the buffer to be decoded into NLRI
-	return decodeIPv6NLRI(b), nextHops
+	return decodeIPv6NLRI(b, ap), nextHops
 
 }
 
@@ -440,25 +476,6 @@ func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) bool {
 		return true
 	}
 	return false
-}
-
-// BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
-func decodeIPv6NLRI(b *bytes.Buffer) []v6Addr {
-	var addrs []v6Addr
-	for {
-		if b.Len() == 0 {
-			break
-		}
-
-		var mask uint8
-		binary.Read(b, binary.BigEndian, &mask)
-
-		addrs = append(addrs, v6Addr{
-			Mask:   mask,
-			Prefix: getIPv6Prefix(b, mask),
-		})
-	}
-	return addrs
 }
 
 func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
