@@ -75,14 +75,12 @@ func decodeCapability(cap []byte, p *parameters) {
 		case cap4Byte:
 			log.Printf("4byte ASN supported")
 			io.CopyN(buf, r, int64(cap.Length))
-			log.Printf("%#v\n", buf)
 			p.ASN32 = decode4OctetAS(buf)
 			p.Supported = append(p.Supported, cap.Code)
 
 		case capMpBgp:
 			log.Printf("Multiprotocol Extenstions supported")
 			io.CopyN(buf, r, int64(cap.Length))
-			log.Printf("%#v\n", buf)
 			addr := decodeMPBGP(buf)
 			log.Printf("AFI is %d, SAFI is %d\n", addr.AFI, addr.SAFI)
 			p.AddrFamilies = append(p.AddrFamilies, addr)
@@ -96,7 +94,6 @@ func decodeCapability(cap []byte, p *parameters) {
 		case capAddPath:
 			log.Printf("AddPath advertised")
 			io.CopyN(buf, r, int64(cap.Length))
-			log.Printf("%#v\n", buf)
 			addr, ok := decodeAddPath(buf)
 			if !ok {
 				log.Printf("Peer is not configured to send multiple paths")
@@ -119,7 +116,6 @@ func decodeCapability(cap []byte, p *parameters) {
 func decode4OctetAS(b *bytes.Buffer) [4]byte {
 	var ASN [4]byte
 	binary.Read(b, binary.BigEndian, &ASN)
-	log.Printf("%#v\n", ASN)
 	log.Println(ASN)
 	return ASN
 }
@@ -138,7 +134,6 @@ func decodeAddPath(b *bytes.Buffer) (addr, bool) {
 		SendRec uint8
 	}
 	binary.Read(b, binary.BigEndian, &adp)
-	log.Printf("%+v\n", adp)
 
 	// 2 means peer can send us multiple paths, 3 means both send and receive.
 	// 1 means peer can only receive.
