@@ -4,3 +4,6 @@
   name = "go"
   enabled = true
   runtime_version = "3.x.x"
+
+  [analyzers.meta]
+  import_path = "github.com/mellowdrifter/bgpwatch"
