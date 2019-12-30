@@ -144,12 +144,16 @@ func uint32ToByte(i uint32) []byte {
 func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 	var param []byte
 
-	// length of parameters are worked out at the end
-	param = append(param, uint8(2), 0)
+	initial := []byte{
+		2, // Parameter Type
+		0, // Length. Adjusted at the end
+		capRefresh,
+		0, // refresh is always size 0
+		cap4Byte,
+		4, // 4 byte ASN is always size 4
+	}
+	param = append(param, initial...)
 
-	// Always send refresh and 4byte support
-	param = append(param, byte(capRefresh), 0)
-	param = append(param, byte(cap4Byte), 4)
 	// TODO: Test this both on real router and test code
 	if isASN32(p.ASN32) {
 		param = append(param, p.ASN32[:]...)
