@@ -66,15 +66,15 @@ func TestDecodeNLRI(t *testing.T) {
 			want: []v4Addr{
 				v4Addr{
 					Mask:   8,
-					Prefix: net.IP{57},
+					Prefix: net.IP{57, 0, 0, 0},
 				},
 				v4Addr{
 					Mask:   24,
-					Prefix: net.IP{157, 150, 32},
+					Prefix: net.IP{157, 150, 32, 0},
 				},
 				v4Addr{
 					Mask:   16,
-					Prefix: net.IP{58, 100},
+					Prefix: net.IP{58, 100, 0, 0},
 				},
 				v4Addr{
 					Mask:   32,
@@ -85,7 +85,7 @@ func TestDecodeNLRI(t *testing.T) {
 	}
 	for _, test := range tests {
 		buf := bytes.NewReader(test.input)
-		got := decodeIPv4NLRI(buf)
+		got := decodeIPv4NLRI(buf, nil)
 
 		if !cmp.Equal(got, test.want) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
@@ -286,7 +286,7 @@ func TestDecodeMPReachNLRI(t *testing.T) {
 	}
 	for _, test := range tests {
 		buf := bytes.NewBuffer(test.input)
-		ip, nh := decodeMPReachNLRI(buf)
+		ip, nh := decodeMPReachNLRI(buf, nil)
 
 		if !cmp.Equal(nh, test.wantNH) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, nh, test.wantNH)
@@ -367,7 +367,7 @@ func TestDecodePathAttributes(t *testing.T) {
 	}
 	for _, test := range tests {
 
-		got := decodePathAttributes(test.input)
+		got := decodePathAttributes(test.input, nil)
 		if !cmp.Equal(got, test.want, cmp.AllowUnexported(pathAttr{})) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
 		}

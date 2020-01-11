@@ -19,12 +19,12 @@ func TestDecodeOptionalParameters(t *testing.T) {
 				0x00, 0x78, 0x41, 0x04, 0x00, 0x00, 0xfc, 0x15, 0x46, 0x00, 0x47, 0x00,
 			},
 			want: parameters{
-				ASN32:   0,
+				ASN32:   [4]byte{0x00, 0x00, 0xfc, 0x15},
 				Refresh: true,
 				AddrFamilies: []addr{
 					addr{
-						AFI:  0,
-						SAFI: 0,
+						AFI:  1,
+						SAFI: 1,
 					},
 				},
 				Supported:   []uint8{1, 65, 70},
@@ -39,12 +39,12 @@ func TestDecodeOptionalParameters(t *testing.T) {
 				0x02, 0x02, 0x02, 0x00,
 			},
 			want: parameters{
-				ASN32:   0,
+				ASN32:   [4]byte{0x00, 0x00, 0x00, 0x00},
 				Refresh: false,
 				AddrFamilies: []addr{
 					addr{
-						AFI:  0,
-						SAFI: 0,
+						AFI:  1,
+						SAFI: 1,
 					},
 				},
 				Supported:   []uint8{1},
