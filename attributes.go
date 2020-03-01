@@ -387,6 +387,7 @@ func getIPv4Prefix(b *bytes.Reader, mask uint8) net.IP {
 }
 
 // BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
+// TODO: Switch should get the read value, then outside of switch I should copyN and deal with errors
 func getIPv6Prefix(b *bytes.Buffer, mask uint8) net.IP {
 	prefix := bytes.NewBuffer(make([]byte, 0, 16))
 
