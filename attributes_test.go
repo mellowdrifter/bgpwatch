@@ -367,7 +367,7 @@ func TestDecodePathAttributes(t *testing.T) {
 	}
 	for _, test := range tests {
 
-		got, _ := decodePathAttributes(test.input, nil)
+		got, _ := decodePathAttributes(test.input, nil, false)
 		if !cmp.Equal(got, test.want, cmp.AllowUnexported(pathAttr{})) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
 		}

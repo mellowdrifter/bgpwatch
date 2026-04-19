@@ -27,15 +27,17 @@ type bgpWatchServer struct {
 	peers    []*peer
 	mutex    sync.RWMutex
 	rib      routing_table.Rib
+	conf     config
 }
 
 type config struct {
-	rid      bgpid
-	port     int
-	grpcPort int
-	logfile  string
-	eor      bool
-	quiet    bool
+	rid               bgpid
+	port              int
+	grpcPort          int
+	logfile           string
+	eor               bool
+	quiet             bool
+	ignoreCommunities bool
 }
 
 func main() {
@@ -46,8 +48,9 @@ func main() {
 	grpcPort := flag.Int("grpc", 1179, "gRPC listen port")
 	weor := flag.Bool("endofrib", false, "log updates only when EoR received")
 	quiet := flag.Bool("quiet", false, "suppress per-update logging, show only periodic stats")
+	ignoreComms := flag.Bool("ignore-communities", false, "ignore and discard BGP communities and large communities")
 	flag.Parse()
-	conf := getConfig(srid, logs, port, grpcPort, weor, quiet)
+	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms)
 
 	// Set up log file
 	if conf.logfile != "" {
@@ -65,6 +68,7 @@ func main() {
 	serv := bgpWatchServer{
 		mutex: sync.RWMutex{},
 		rib:   routing_table.GetNewRib(),
+		conf:  conf,
 	}
 	serv.listen(conf)
 	go serv.clean()
@@ -72,19 +76,20 @@ func main() {
 	serv.start(conf)
 }
 
-func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet *bool) config {
+func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms *bool) config {
 	rid, err := getRid(srid)
 	if err != nil {
 		log.Fatalf("Unable to convert %s to RID format: %v", *srid, err)
 	}
 
 	return config{
-		rid:      rid,
-		port:     *port,
-		grpcPort: *grpcPort,
-		logfile:  *logf,
-		eor:      *eor,
-		quiet:    *quiet,
+		rid:               rid,
+		port:              *port,
+		grpcPort:          *grpcPort,
+		logfile:           *logf,
+		eor:               *eor,
+		quiet:             *quiet,
+		ignoreCommunities: *ignoreComms,
 	}
 }
 

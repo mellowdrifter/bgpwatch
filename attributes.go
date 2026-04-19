@@ -122,7 +122,7 @@ type prefixAttributes struct {
 }
 
 // AddPath is just shoved in here. Fix this
-func decodePathAttributes(attr []byte, ap []addr) (*pathAttr, error) {
+func decodePathAttributes(attr []byte, ap []addr, ignoreComms bool) (*pathAttr, error) {
 	r := bytes.NewReader(attr)
 
 	var pa pathAttr
@@ -192,10 +192,22 @@ func decodePathAttributes(attr []byte, ap []addr) (*pathAttr, error) {
 		case tcMPUnreachNLRI:
 			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len)
 		case tcCommunity:
+			if ignoreComms {
+				_, err = io.CopyN(io.Discard, buf, len)
+				continue
+			}
 			pa.communities, err = decodeCommunities(buf, len)
 		case tcLargeCommunity:
+			if ignoreComms {
+				_, err = io.CopyN(io.Discard, buf, len)
+				continue
+			}
 			pa.largeCommunities, err = decodeLargeCommunities(buf, len)
 		case tcExtendCommunity:
+			if ignoreComms {
+				_, err = io.CopyN(io.Discard, buf, len)
+				continue
+			}
 			pa.extendCommunities, err = decodeExtendedCommunities(buf, len)
 		case tcOriginator:
 			pa.originator, err = decode4byteIPv4(buf)

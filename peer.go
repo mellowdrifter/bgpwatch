@@ -265,7 +265,7 @@ func (p *peer) handleUpdate() error {
 	}
 
 	// decode attributes
-	attr, err := decodePathAttributes(abuf, p.param.AddPath)
+	attr, err := decodePathAttributes(abuf, p.param.AddPath, p.server.conf.ignoreCommunities)
 	if err != nil {
 		return err
 	}
