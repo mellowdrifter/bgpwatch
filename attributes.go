@@ -121,7 +121,7 @@ type prefixAttributes struct {
 }
 
 // AddPath is just shoved in here. Fix this
-func decodePathAttributes(attr []byte, ap []addr) *pathAttr {
+func decodePathAttributes(attr []byte, ap []addr) (*pathAttr, error) {
 	r := bytes.NewReader(attr)
 
 	var pa pathAttr
@@ -130,7 +130,12 @@ func decodePathAttributes(attr []byte, ap []addr) *pathAttr {
 			break
 		}
 		var ah attrHeader
-		binary.Read(r, binary.BigEndian, &ah)
+		if err := binary.Read(r, binary.BigEndian, &ah); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
 
 		// Is this of size 64 by default?
 		// TODO: check
@@ -141,58 +146,75 @@ func decodePathAttributes(attr []byte, ap []addr) *pathAttr {
 		var len int64
 		if isExtended(ah.Type.Flags) {
 			var length uint16
-			binary.Read(r, binary.BigEndian, &length)
+			if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+				return nil, err
+			}
 			len = int64(length)
 		} else {
 			var length uint8
-			binary.Read(r, binary.BigEndian, &length)
+			if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+				return nil, err
+			}
 			len = int64(length)
 		}
 
 		// Copy the entire attribute into a new buffer
-		io.CopyN(buf, r, len)
+		if _, err := io.CopyN(buf, r, len); err != nil {
+			return nil, err
+		}
 
+		var err error
 		switch ah.Type.Code {
 		case tcOrigin:
-			pa.origin = decodeOrigin(buf)
+			pa.origin, err = decodeOrigin(buf)
 		case tcASPath:
 			for buf.Len() > 0 {
-				pa.aspath = append(pa.aspath, decodeASPath(buf)...)
+				var asns []asnSegment
+				asns, err = decodeASPath(buf)
+				if err != nil {
+					break
+				}
+				pa.aspath = append(pa.aspath, asns...)
 			}
 		case tcNextHop:
-			pa.nextHopv4 = decode4byteIPv4(buf)
+			pa.nextHopv4, err = decode4byteIPv4(buf)
 		case tcMED:
-			pa.med = decode4ByteNumber(buf)
+			pa.med, err = decode4ByteNumber(buf)
 		case tcLPref:
-			pa.localPref = decode4ByteNumber(buf)
+			pa.localPref, err = decode4ByteNumber(buf)
 		case tcAtoAgg:
 			pa.atomic = true
 		case tcAggregator:
-			pa.agAS, pa.agOrigin = decodeAggregator(buf)
+			pa.agAS, pa.agOrigin, err = decodeAggregator(buf)
 		case tcMPReachNLRI:
-			pa.ipv6NLRI, pa.nextHopsv6 = decodeMPReachNLRI(buf, ap)
+			pa.ipv6NLRI, pa.nextHopsv6, err = decodeMPReachNLRI(buf, ap)
 		case tcMPUnreachNLRI:
-			pa.v6EoR = decodeMPUnreachNLRI(buf, 3)
+			pa.v6EoR, err = decodeMPUnreachNLRI(buf, 3)
 		case tcCommunity:
-			pa.communities = decodeCommunities(buf, len)
+			pa.communities, err = decodeCommunities(buf, len)
 		case tcLargeCommunity:
-			pa.largeCommunities = decodeLargeCommunities(buf, len)
+			pa.largeCommunities, err = decodeLargeCommunities(buf, len)
 		case tcExtendCommunity:
-			pa.extendCommunities = decodeExtendedCommunities(buf, len)
+			pa.extendCommunities, err = decodeExtendedCommunities(buf, len)
 		case tcOriginator:
-			pa.originator = decode4byteIPv4(buf)
+			pa.originator, err = decode4byteIPv4(buf)
 		case tcClusterList:
-			pa.clusterList = decodeClusterList(buf, len)
+			pa.clusterList, err = decodeClusterList(buf, len)
 
 		default:
 			log.Printf("Type Code %d is not implemented", ah.Type.Code)
-			io.CopyN(ioutil.Discard, buf, len)
+			_, err = io.CopyN(ioutil.Discard, buf, len)
 		}
+
+		if err != nil {
+			return nil, err
+		}
+
 		if isDeprecated[ah.Type.Code] {
 			log.Printf("Type Code %d is deprecated", ah.Type.Code)
 		}
 	}
-	return &pa
+	return &pa, nil
 }
 
 // Extended-length means two bytes, else one
@@ -201,32 +223,40 @@ func isExtended(b byte) bool {
 	return res == 16
 }
 
-func decodeOrigin(b *bytes.Buffer) origin {
+func decodeOrigin(b *bytes.Buffer) (origin, error) {
 	var o origin
-	binary.Read(b, binary.BigEndian, &o)
+	if err := binary.Read(b, binary.BigEndian, &o); err != nil {
+		return o, err
+	}
 
-	return o
+	return o, nil
 }
 
-func decode4byteIPv4(b *bytes.Buffer) string {
+func decode4byteIPv4(b *bytes.Buffer) (string, error) {
 	ip := bytes.NewBuffer(make([]byte, 0, 4))
-	io.CopyN(ip, b, 4)
+	if _, err := io.CopyN(ip, b, 4); err != nil {
+		return "", err
+	}
 
-	return net.IP(ip.Bytes()).String()
+	return net.IP(ip.Bytes()).String(), nil
 }
 
-func decode16byteIPv6(b *bytes.Buffer) string {
+func decode16byteIPv6(b *bytes.Buffer) (string, error) {
 	ip := bytes.NewBuffer(make([]byte, 0, 16))
-	io.CopyN(ip, b, 16)
+	if _, err := io.CopyN(ip, b, 16); err != nil {
+		return "", err
+	}
 
-	return net.IP(ip.Bytes()).String()
+	return net.IP(ip.Bytes()).String(), nil
 }
 
-func decode4ByteNumber(b *bytes.Buffer) uint32 {
+func decode4ByteNumber(b *bytes.Buffer) (uint32, error) {
 	var n uint32
-	binary.Read(b, binary.BigEndian, &n)
+	if err := binary.Read(b, binary.BigEndian, &n); err != nil {
+		return n, err
+	}
 
-	return n
+	return n, nil
 }
 
 type asnTL struct {
@@ -240,28 +270,36 @@ type asnSegment struct {
 }
 
 // If empty, could be iBGP update and so should deal with that
-func decodeASPath(b *bytes.Buffer) []asnSegment {
+func decodeASPath(b *bytes.Buffer) ([]asnSegment, error) {
 	var asnTL asnTL
-	binary.Read(b, binary.BigEndian, &asnTL)
+	if err := binary.Read(b, binary.BigEndian, &asnTL); err != nil {
+		return nil, err
+	}
 	var asns = make([]asnSegment, asnTL.Length)
 	for i := uint8(0); i < asnTL.Length; i++ {
 		var asn asnSegment
 		asn.Type = asnTL.Type
-		binary.Read(b, binary.BigEndian, &asn.ASN)
+		if err := binary.Read(b, binary.BigEndian, &asn.ASN); err != nil {
+			return nil, err
+		}
 		asns[i] = asn
 	}
-	return asns
+	return asns, nil
 }
 
-func decodeAggregator(b *bytes.Buffer) (uint32, net.IP) {
+func decodeAggregator(b *bytes.Buffer) (uint32, net.IP, error) {
 	ip := bytes.NewBuffer(make([]byte, 0, 4))
 	var asn uint32
-	binary.Read(b, binary.BigEndian, &asn)
-	io.Copy(ip, b)
-	return asn, net.IP(ip.Bytes())
+	if err := binary.Read(b, binary.BigEndian, &asn); err != nil {
+		return 0, nil, err
+	}
+	if _, err := io.Copy(ip, b); err != nil {
+		return 0, nil, err
+	}
+	return asn, net.IP(ip.Bytes()), nil
 }
 
-func decodeCommunities(b *bytes.Buffer, len int64) []community {
+func decodeCommunities(b *bytes.Buffer, len int64) ([]community, error) {
 	// Each community takes 4 bytes
 	var communities = make([]community, 0, len/4)
 	for {
@@ -269,13 +307,18 @@ func decodeCommunities(b *bytes.Buffer, len int64) []community {
 			break
 		}
 		var comm community
-		binary.Read(b, binary.BigEndian, &comm)
+		if err := binary.Read(b, binary.BigEndian, &comm); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
 		communities = append(communities, comm)
 	}
-	return communities
+	return communities, nil
 }
 
-func decodeLargeCommunities(b *bytes.Buffer, len int64) []largeCommunity {
+func decodeLargeCommunities(b *bytes.Buffer, len int64) ([]largeCommunity, error) {
 	// Each large community takes 12 bytes
 	var communities = make([]largeCommunity, 0, len/12)
 	for {
@@ -283,34 +326,45 @@ func decodeLargeCommunities(b *bytes.Buffer, len int64) []largeCommunity {
 			break
 		}
 		var comm largeCommunity
-		binary.Read(b, binary.BigEndian, &comm)
+		if err := binary.Read(b, binary.BigEndian, &comm); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
 		communities = append(communities, comm)
 	}
-	return communities
+	return communities, nil
 }
 
 // TODO: Extended communities can hold many different things so this function itself
 // can end up very complicated. Maybe just dump the bytes? A bit nasty so maybe not.
 // For now just null0 the update
 // rfc4360
-func decodeExtendedCommunities(b *bytes.Buffer, len int64) []extendCommunity {
-	io.CopyN(ioutil.Discard, b, len)
-	return nil
+func decodeExtendedCommunities(b *bytes.Buffer, len int64) ([]extendCommunity, error) {
+	if _, err := io.CopyN(ioutil.Discard, b, len); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // Cluster List is a series of Cluster IDs.
 // RFC4456 - Section 8
-func decodeClusterList(b *bytes.Buffer, len int64) []string {
+func decodeClusterList(b *bytes.Buffer, len int64) ([]string, error) {
 	var cluster []string
 	ids := int(len / 4)
 	for i := 0; i < ids; i++ {
-		cluster = append(cluster, decode4byteIPv4(b))
+		str, err := decode4byteIPv4(b)
+		if err != nil {
+			return nil, err
+		}
+		cluster = append(cluster, str)
 	}
-	return cluster
+	return cluster, nil
 }
 
 // TODO: ap = AddPath AFs. Should really be a bool instead.
-func decodeIPv4NLRI(b *bytes.Reader, ap []addr) []v4Addr {
+func decodeIPv4NLRI(b *bytes.Reader, ap []addr) ([]v4Addr, error) {
 	var addrs []v4Addr
 	for {
 		if b.Len() == 0 {
@@ -320,24 +374,33 @@ func decodeIPv4NLRI(b *bytes.Reader, ap []addr) []v4Addr {
 		var id uint32
 		// YUCK
 		if len(ap) != 0 {
-			binary.Read(b, binary.BigEndian, &id)
+			if err := binary.Read(b, binary.BigEndian, &id); err != nil {
+				return nil, err
+			}
 		}
 
 		var mask uint8
-		binary.Read(b, binary.BigEndian, &mask)
+		if err := binary.Read(b, binary.BigEndian, &mask); err != nil {
+			return nil, err
+		}
+
+		prefix, err := getIPv4Prefix(b, mask)
+		if err != nil {
+			return nil, err
+		}
 
 		addrs = append(addrs, v4Addr{
 			Mask:   mask,
-			Prefix: getIPv4Prefix(b, mask),
+			Prefix: prefix,
 			ID:     id,
 		})
 	}
 
-	return addrs
+	return addrs, nil
 }
 
 // TODO: As above
-func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) []v6Addr {
+func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, error) {
 	var addrs []v6Addr
 	for {
 		if b.Len() == 0 {
@@ -347,98 +410,111 @@ func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) []v6Addr {
 		var id uint32
 		// YUCK
 		if len(ap) != 0 {
-			binary.Read(b, binary.BigEndian, &id)
+			if err := binary.Read(b, binary.BigEndian, &id); err != nil {
+				return nil, err
+			}
 		}
 
 		var mask uint8
-		binary.Read(b, binary.BigEndian, &mask)
+		if err := binary.Read(b, binary.BigEndian, &mask); err != nil {
+			return nil, err
+		}
+
+		prefix, err := getIPv6Prefix(b, mask)
+		if err != nil {
+			return nil, err
+		}
 
 		addrs = append(addrs, v6Addr{
 			Mask:   mask,
-			Prefix: getIPv6Prefix(b, mask),
+			Prefix: prefix,
 			ID:     id,
 		})
 	}
-	return addrs
+	return addrs, nil
 }
 
 // BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
-func getIPv4Prefix(b *bytes.Reader, mask uint8) net.IP {
+func getIPv4Prefix(b *bytes.Reader, mask uint8) (net.IP, error) {
 	prefix := bytes.NewBuffer(make([]byte, 0, 4))
 
 	switch {
 	case mask >= 1 && mask <= 8:
-		io.CopyN(prefix, b, 1)
+		if _, err := io.CopyN(prefix, b, 1); err != nil { return nil, err }
 	case mask >= 9 && mask <= 16:
-		io.CopyN(prefix, b, 2)
+		if _, err := io.CopyN(prefix, b, 2); err != nil { return nil, err }
 	case mask >= 17 && mask <= 24:
-		io.CopyN(prefix, b, 3)
+		if _, err := io.CopyN(prefix, b, 3); err != nil { return nil, err }
 	case mask >= 25:
-		io.CopyN(prefix, b, 4)
+		if _, err := io.CopyN(prefix, b, 4); err != nil { return nil, err }
 	}
 
 	for prefix.Len() < 4 {
 		prefix.WriteByte(0)
 	}
 
-	return net.IP(prefix.Bytes())
+	return net.IP(prefix.Bytes()), nil
 }
 
 // BGP only encodes the prefix up to the subnet value in bits, and then pads zeros until the end of the octet.
 // TODO: Switch should get the read value, then outside of switch I should copyN and deal with errors
-func getIPv6Prefix(b *bytes.Buffer, mask uint8) net.IP {
+func getIPv6Prefix(b *bytes.Buffer, mask uint8) (net.IP, error) {
 	prefix := bytes.NewBuffer(make([]byte, 0, 16))
 
 	switch {
 	case mask >= 1 && mask <= 8:
-		io.CopyN(prefix, b, 1)
+		if _, err := io.CopyN(prefix, b, 1); err != nil { return nil, err }
 	case mask >= 9 && mask <= 16:
-		io.CopyN(prefix, b, 2)
+		if _, err := io.CopyN(prefix, b, 2); err != nil { return nil, err }
 	case mask >= 17 && mask <= 24:
-		io.CopyN(prefix, b, 3)
+		if _, err := io.CopyN(prefix, b, 3); err != nil { return nil, err }
 	case mask >= 25 && mask <= 32:
-		io.CopyN(prefix, b, 4)
+		if _, err := io.CopyN(prefix, b, 4); err != nil { return nil, err }
 	case mask >= 33 && mask <= 40:
-		io.CopyN(prefix, b, 5)
+		if _, err := io.CopyN(prefix, b, 5); err != nil { return nil, err }
 	case mask >= 41 && mask <= 48:
-		io.CopyN(prefix, b, 6)
+		if _, err := io.CopyN(prefix, b, 6); err != nil { return nil, err }
 	case mask >= 49 && mask <= 56:
-		io.CopyN(prefix, b, 7)
+		if _, err := io.CopyN(prefix, b, 7); err != nil { return nil, err }
 	case mask >= 57 && mask <= 64:
-		io.CopyN(prefix, b, 8)
+		if _, err := io.CopyN(prefix, b, 8); err != nil { return nil, err }
 	case mask >= 65 && mask <= 72:
-		io.CopyN(prefix, b, 9)
+		if _, err := io.CopyN(prefix, b, 9); err != nil { return nil, err }
 	case mask >= 73 && mask <= 80:
-		io.CopyN(prefix, b, 10)
+		if _, err := io.CopyN(prefix, b, 10); err != nil { return nil, err }
 	case mask >= 81 && mask <= 88:
-		io.CopyN(prefix, b, 11)
+		if _, err := io.CopyN(prefix, b, 11); err != nil { return nil, err }
 	case mask >= 89 && mask <= 96:
-		io.CopyN(prefix, b, 12)
+		if _, err := io.CopyN(prefix, b, 12); err != nil { return nil, err }
 	case mask >= 97 && mask <= 104:
-		io.CopyN(prefix, b, 13)
+		if _, err := io.CopyN(prefix, b, 13); err != nil { return nil, err }
 	case mask >= 105 && mask <= 112:
-		io.CopyN(prefix, b, 14)
+		if _, err := io.CopyN(prefix, b, 14); err != nil { return nil, err }
 	case mask >= 113 && mask <= 120:
-		io.CopyN(prefix, b, 15)
+		if _, err := io.CopyN(prefix, b, 15); err != nil { return nil, err }
 	case mask >= 121 && mask <= 128:
-		io.CopyN(prefix, b, 16)
+		if _, err := io.CopyN(prefix, b, 16); err != nil { return nil, err }
 	}
 
 	for prefix.Len() < 16 {
 		prefix.WriteByte(0)
 	}
 
-	return net.IP(prefix.Bytes())
+	return net.IP(prefix.Bytes()), nil
 }
 
-func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string) {
+func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 	// AFI/SAFI - For now I only IPv6 Unicast
 	var afi uint16
 	var safi uint8
 	// Could be two next-hops
 	var nextHops []string
-	binary.Read(b, binary.BigEndian, &afi)
-	binary.Read(b, binary.BigEndian, &safi)
+	if err := binary.Read(b, binary.BigEndian, &afi); err != nil {
+		return nil, nil, err
+	}
+	if err := binary.Read(b, binary.BigEndian, &safi); err != nil {
+		return nil, nil, err
+	}
 	log.Println(afi)
 	log.Println(safi)
 	// In the above, I'm really only supporting IPv6 here. The rest is dependant on which AFI/SAFI
@@ -448,36 +524,53 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string) {
 	// But if the actual next-hop is link-local, the initial next-hop is :: ?
 	// TODO: check multivendors. Why is link local sent on iBGP? What about eBGP local and remote?
 	var nhLen uint8
-	binary.Read(b, binary.BigEndian, &nhLen)
+	if err := binary.Read(b, binary.BigEndian, &nhLen); err != nil {
+		return nil, nil, err
+	}
 	log.Println(nhLen)
 
 	nh := bytes.NewBuffer(make([]byte, 0, 16))
-	io.CopyN(nh, b, 16)
-	nextHops = append(nextHops, decode16byteIPv6(nh))
+	if _, err := io.CopyN(nh, b, 16); err != nil {
+		return nil, nil, err
+	}
+	ip, err := decode16byteIPv6(nh)
+	if err != nil {
+		return nil, nil, err
+	}
+	nextHops = append(nextHops, ip)
 
 	if nhLen == 32 {
 		llnh := bytes.NewBuffer(make([]byte, 0, 16))
-		io.CopyN(llnh, b, 16)
-		nextHops = append(nextHops, decode16byteIPv6(llnh))
+		if _, err := io.CopyN(llnh, b, 16); err != nil {
+			return nil, nil, err
+		}
+		llip, err := decode16byteIPv6(llnh)
+		if err != nil {
+			return nil, nil, err
+		}
+		nextHops = append(nextHops, llip)
 	}
 
 	// Ignore one byte SNPA
-	io.CopyN(ioutil.Discard, b, 1)
+	if _, err := io.CopyN(ioutil.Discard, b, 1); err != nil {
+		return nil, nil, err
+	}
 
 	// Pass the remainder of the buffer to be decoded into NLRI
-	return decodeIPv6NLRI(b, ap), nextHops
+	nlri, err := decodeIPv6NLRI(b, ap)
+	return nlri, nextHops, err
 
 }
 
 // TODO: finish this off...
-func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) bool {
+func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) (bool, error) {
 	if len == 3 {
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
-func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
+func decodeIPv4Withdraws(wd []byte) (*prefixAttributes, error) {
 	r := bytes.NewReader(wd)
 	var pa prefixAttributes
 	var addrs []v4Addr
@@ -487,16 +580,23 @@ func decodeIPv4Withdraws(wd []byte) *prefixAttributes {
 		}
 
 		var mask uint8
-		binary.Read(r, binary.BigEndian, &mask)
+		if err := binary.Read(r, binary.BigEndian, &mask); err != nil {
+			return nil, err
+		}
+
+		prefix, err := getIPv4Prefix(r, mask)
+		if err != nil {
+			return nil, err
+		}
 
 		addrs = append(addrs, v4Addr{
 			Mask:   mask,
-			Prefix: getIPv4Prefix(r, mask),
+			Prefix: prefix,
 		})
 	}
 	pa.v4Withdraws = addrs
 
-	return &pa
+	return &pa, nil
 }
 
 // Return a properly formatted AS-PATH. Sequnce AS-PATH

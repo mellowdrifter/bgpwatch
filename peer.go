@@ -58,29 +58,45 @@ func (p *peer) peerWorker() {
 		header, err := p.getType()
 		if err != nil {
 			log.Printf("Unable to decode header: %v\n", err)
+			p.conn.Close()
 			return
 		}
 
 		switch header {
 		case open:
-			p.HandleOpen()
+			if err := p.HandleOpen(); err != nil {
+				log.Printf("Error handling Open: %v\n", err)
+				p.conn.Close()
+				return
+			}
 			p.createOpen()
 			// TODO: Following should go outside of the switch statement once the rest are done
 			p.encodeOutgoing()
 
 		case keepalive:
-			p.HandleKeepalive()
+			if err := p.HandleKeepalive(); err != nil {
+				log.Printf("Error handling Keepalive: %v\n", err)
+				p.conn.Close()
+				return
+			}
 			p.createKeepAlive()
 			p.encodeOutgoing()
 
 		case update:
-			p.handleUpdate()
+			if err := p.handleUpdate(); err != nil {
+				log.Printf("Error handling Update: %v\n", err)
+				p.conn.Close()
+				return
+			}
 
 			// output and dump that update
 			p.logUpdate()
 
 		case notification:
-			p.handleNotification()
+			if err := p.handleNotification(); err != nil {
+				log.Printf("Error handling Notification: %v\n", err)
+				p.conn.Close()
+			}
 			return
 
 		default:
@@ -130,29 +146,39 @@ func getMessageLength(b []byte) int {
 
 func (p *peer) getType() (uint8, error) {
 	var t uint8
-	binary.Read(p.in, binary.BigEndian, &t)
+	if err := binary.Read(p.in, binary.BigEndian, &t); err != nil {
+		return 0, err
+	}
 
 	return t, nil
 }
 
-func (p *peer) HandleKeepalive() {
+func (p *peer) HandleKeepalive() error {
 	p.mutex.Lock()
 	p.keepalives++
 	p.lastKeepalive = time.Now()
 	p.mutex.Unlock()
 	log.Printf("received keepalive #%d\n", p.keepalives)
+	return nil
 }
 
-func (p *peer) HandleOpen() {
+func (p *peer) HandleOpen() error {
 	log.Println("Received Open Message")
 	var o msgOpen
-	binary.Read(p.in, binary.BigEndian, &o)
+	if err := binary.Read(p.in, binary.BigEndian, &o); err != nil {
+		return err
+	}
 
 	// Read parameters into new buffer
 	pbuffer := make([]byte, int(o.ParamLen))
-	io.ReadFull(p.in, pbuffer)
+	if _, err := io.ReadFull(p.in, pbuffer); err != nil {
+		return err
+	}
 
-	params := decodeOptionalParameters(&pbuffer)
+	params, err := decodeOptionalParameters(&pbuffer)
+	if err != nil {
+		return err
+	}
 
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -161,37 +187,49 @@ func (p *peer) HandleOpen() {
 	p.asn = o.ASN
 	p.holdtime = o.HoldTime
 	p.param = params
+	return nil
 }
 
-func (p *peer) handleNotification() {
+func (p *peer) handleNotification() error {
 	var n msgNotification
-	binary.Read(p.in, binary.BigEndian, &n)
+	if err := binary.Read(p.in, binary.BigEndian, &n); err != nil {
+		return err
+	}
 
 	log.Printf("Notification received: code is %d with subcode %d\n", n.Code, n.Subcode)
 	log.Println("Closing session")
 	// TODO: This closes the session, but it does not yet remove the session
 	p.conn.Close()
-
+	return nil
 }
 
 // Handle update messages. IPv6 updates are encoded in attributes unlike IPv4.
-func (p *peer) handleUpdate() {
+func (p *peer) handleUpdate() error {
 	var pa prefixAttributes
 
 	var withdraw uint16
-	binary.Read(p.in, binary.BigEndian, &withdraw)
+	if err := binary.Read(p.in, binary.BigEndian, &withdraw); err != nil {
+		return err
+	}
 
 	// IPv4 withdraws are done here
 	// TODO: IPv4 Path ID withdraws?
 	if withdraw != 0 {
 		wbuf := make([]byte, withdraw)
-		io.ReadFull(p.in, wbuf)
-		wd := decodeIPv4Withdraws(wbuf)
+		if _, err := io.ReadFull(p.in, wbuf); err != nil {
+			return err
+		}
+		wd, err := decodeIPv4Withdraws(wbuf)
+		if err != nil {
+			return err
+		}
 		pa.v4Withdraws = wd.v4Withdraws
 	}
 
 	var attrLength twoByteLength
-	binary.Read(p.in, binary.BigEndian, &attrLength)
+	if err := binary.Read(p.in, binary.BigEndian, &attrLength); err != nil {
+		return err
+	}
 
 	// Zero withdraws and zero attributes means IPv4 End-of-RIB
 	if withdraw == 0 && attrLength.toUint16() == 0 {
@@ -200,26 +238,36 @@ func (p *peer) handleUpdate() {
 		pa.v4EoR = true
 		p.prefixes = &pa
 		p.mutex.Unlock()
-		return
+		return nil
 	}
 
 	if attrLength.toUint16() == 0 {
 		p.mutex.Lock()
 		p.prefixes = &pa
 		p.mutex.Unlock()
-		return
+		return nil
 	}
 
 	// Drain all path attributes into a new buffer to decode.
 	abuf := make([]byte, attrLength.toUint16())
-	io.ReadFull(p.in, abuf)
+	if _, err := io.ReadFull(p.in, abuf); err != nil {
+		return err
+	}
 
 	// decode attributes
-	pa.attr = decodePathAttributes(abuf, p.param.AddPath)
+	attr, err := decodePathAttributes(abuf, p.param.AddPath)
+	if err != nil {
+		return err
+	}
+	pa.attr = attr
 
 	// Any remaining bytes are IPv4 NLRI
 	if p.in.Len() > 0 {
-		pa.v4prefixes = decodeIPv4NLRI(p.in, p.param.AddPath)
+		v4prefixes, err := decodeIPv4NLRI(p.in, p.param.AddPath)
+		if err != nil {
+			return err
+		}
+		pa.v4prefixes = v4prefixes
 	}
 
 	// Copy certain attributes over to upper struct
@@ -232,6 +280,7 @@ func (p *peer) handleUpdate() {
 	p.mutex.Lock()
 	p.prefixes = &pa
 	p.mutex.Unlock()
+	return nil
 }
 
 //TODO: Not showing IPv4 Next-Hop

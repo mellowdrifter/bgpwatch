@@ -53,7 +53,7 @@ func TestDecodeOptionalParameters(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		got := decodeOptionalParameters(&test.input)
+		got, _ := decodeOptionalParameters(&test.input)
 
 		if !cmp.Equal(got, test.want) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
