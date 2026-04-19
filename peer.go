@@ -103,9 +103,14 @@ func getMessage(c net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("Packet is not a BGP packet as does not have the marker present")
 	}
 
+	msgLen := getMessageLength(header[16:])
+	if msgLen < minMessage || msgLen > maxMessage {
+		return nil, fmt.Errorf("invalid BGP message length: %d", msgLen)
+	}
+
 	// len will be the remainder of the packet, minus the 18 bytes already taken above.
-	len := getMessageLength(header[16:]) - 18
-	buffer := make([]byte, len)
+	remLen := msgLen - 18
+	buffer := make([]byte, remLen)
 
 	// Read in the rest of the packet and return.
 	_, err = io.ReadFull(c, buffer)
