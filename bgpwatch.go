@@ -38,6 +38,7 @@ type config struct {
 	eor               bool
 	quiet             bool
 	ignoreCommunities bool
+	peersConfig       map[string]PeerConfig
 }
 
 func main() {
@@ -49,8 +50,9 @@ func main() {
 	weor := flag.Bool("endofrib", false, "log updates only when EoR received")
 	quiet := flag.Bool("quiet", false, "suppress per-update logging, show only periodic stats")
 	ignoreComms := flag.Bool("ignore-communities", false, "ignore and discard BGP communities and large communities")
+	configFile := flag.String("config", "", "path to JSON configuration file containing peer IPs and MD5 passwords")
 	flag.Parse()
-	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms)
+	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms, configFile)
 
 	// Set up log file
 	if conf.logfile != "" {
@@ -76,10 +78,18 @@ func main() {
 	serv.start(conf)
 }
 
-func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms *bool) config {
+func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms *bool, configFile *string) config {
 	rid, err := getRid(srid)
 	if err != nil {
 		log.Fatalf("Unable to convert %s to RID format: %v", *srid, err)
+	}
+
+	var peersMap map[string]PeerConfig
+	if *configFile != "" {
+		peersMap, err = loadConfigFile(*configFile)
+		if err != nil {
+			log.Fatalf("Failed to load config file: %v", err)
+		}
 	}
 
 	return config{
@@ -90,6 +100,7 @@ func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms 
 		eor:               *eor,
 		quiet:             *quiet,
 		ignoreCommunities: *ignoreComms,
+		peersConfig:       peersMap,
 	}
 }
 
@@ -112,16 +123,7 @@ func getRid(srid *string) (bgpid, error) {
 	return rid, nil
 }
 
-// Start listening
-func (s *bgpWatchServer) listen(c config) {
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", c.port))
-	if err != nil {
-		log.Fatalf("Unable to start server: %v", err)
-	}
-	s.listener = l
-	log.Printf("Listening on port %d\n", c.port)
 
-}
 
 // start will start the listener as well as start each peer worker.
 func (s *bgpWatchServer) start(conf config) {
@@ -131,7 +133,9 @@ func (s *bgpWatchServer) start(conf config) {
 			log.Printf("%v\n", err)
 		} else {
 			peer := s.accept(conn, conf)
-			go peer.peerWorker()
+			if peer != nil {
+				go peer.peerWorker()
+			}
 		}
 	}
 }
@@ -165,13 +169,22 @@ func (s *bgpWatchServer) clean() {
 
 // accept adds a new client to the current list of clients being served.
 func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
+	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+
+	// Whitelist check
+	if c.peersConfig != nil {
+		if _, ok := c.peersConfig[ip]; !ok {
+			log.Printf("Connection from %v ignored (not in config)\n", conn.RemoteAddr().String())
+			conn.Close()
+			return nil
+		}
+	}
+
 	log.Printf("Connection from %v, total peers: %d\n",
 		conn.RemoteAddr().String(), len(s.peers)+1)
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-
-	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 
 	// If new client trying to connect with existing connection, remove old peer from pool
 	for i, check := range s.peers {
