@@ -156,9 +156,7 @@ func decodePathAttributes(attr []byte, ap []addr) *pathAttr {
 		case tcOrigin:
 			pa.origin = decodeOrigin(buf)
 		case tcASPath:
-			pa.aspath = append(pa.aspath, decodeASPath(buf)...)
-			// Could have both AS_SEQ and AS_SET
-			if r.Len() != 0 {
+			for buf.Len() > 0 {
 				pa.aspath = append(pa.aspath, decodeASPath(buf)...)
 			}
 		case tcNextHop:
