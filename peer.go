@@ -183,10 +183,8 @@ func (p *peer) handleUpdate() {
 	if withdraw != 0 {
 		wbuf := make([]byte, withdraw)
 		io.ReadFull(p.in, wbuf)
-		p.mutex.Lock()
-		p.prefixes = decodeIPv4Withdraws(wbuf)
-		p.mutex.Unlock()
-		return
+		wd := decodeIPv4Withdraws(wbuf)
+		pa.v4Withdraws = wd.v4Withdraws
 	}
 
 	var attrLength twoByteLength
@@ -202,8 +200,10 @@ func (p *peer) handleUpdate() {
 		return
 	}
 
-	// TODO: Do I still need another check here?
 	if attrLength.toUint16() == 0 {
+		p.mutex.Lock()
+		p.prefixes = &pa
+		p.mutex.Unlock()
 		return
 	}
 
@@ -214,16 +214,13 @@ func (p *peer) handleUpdate() {
 	// decode attributes
 	pa.attr = decodePathAttributes(abuf, p.param.AddPath)
 
-	// IPv6 updates are done via attributes. Only pass the remainder of the buffer to decodeIPv4NLRI if
-	// there are no IPv6 updates in the attributes.
-	if len(pa.attr.ipv6NLRI) == 0 && !pa.attr.v6EoR {
-		// dump the rest of the update message into a buffer to use for NLRI
-		// It is possible to work this out as well... needed for a copy.
-		// for now just read the last of the in buffer :(
+	// Any remaining bytes are IPv4 NLRI
+	if p.in.Len() > 0 {
 		pa.v4prefixes = decodeIPv4NLRI(p.in, p.param.AddPath)
-		// TODO: What about withdraws???
-	} else {
-		// Copy certain attributes over to upper struct
+	}
+
+	// Copy certain attributes over to upper struct
+	if pa.attr != nil {
 		pa.v6prefixes = pa.attr.ipv6NLRI
 		pa.v6NextHops = pa.attr.nextHopsv6
 		pa.v6EoR = pa.attr.v6EoR
