@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package bgpwatch;
+
+option go_package = "github.com/mellowdrifter/bgpwatch/proto";
+
+message Empty {}
+
+message TotalsResponse {
+  int32 ipv4_count = 1;
+  int32 ipv6_count = 2;
+}
+
+message MasksResponse {
+  map<int32, int32> ipv4_masks = 1;
+  map<int32, int32> ipv6_masks = 2;
+}
+
+service BGPWatch {
+  // GetTotals returns the total number of IPv4 and IPv6 prefixes across all peers.
+  rpc GetTotals(Empty) returns (TotalsResponse);
+
+  // GetMasks returns the subnet mask distributions for IPv4 and IPv6.
+  rpc GetMasks(Empty) returns (MasksResponse);
+
+  // GetSystemStats returns memory usage statistics for the system and per peer.
+  rpc GetSystemStats(Empty) returns (SystemStatsResponse);
+}
+
+message SystemStatsResponse {
+  uint64 total_ram_bytes = 1;
+  map<string, uint64> peer_ram_bytes = 2;
+}

@@ -151,7 +151,6 @@ func decode4OctetAS(b *bytes.Buffer) ([4]byte, error) {
 	if err := binary.Read(b, binary.BigEndian, &ASN); err != nil {
 		return ASN, err
 	}
-	log.Println(ASN)
 	return ASN, nil
 }
 

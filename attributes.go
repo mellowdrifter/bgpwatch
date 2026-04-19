@@ -203,7 +203,7 @@ func decodePathAttributes(attr []byte, ap []addr) (*pathAttr, error) {
 			pa.clusterList, err = decodeClusterList(buf, len)
 
 		default:
-			log.Printf("Type Code %d is not implemented", ah.Type.Code)
+			//log.Printf("Type Code %d is not implemented", ah.Type.Code)
 			_, err = io.CopyN(ioutil.Discard, buf, len)
 		}
 
@@ -441,13 +441,21 @@ func getIPv4Prefix(b *bytes.Reader, mask uint8) (net.IP, error) {
 
 	switch {
 	case mask >= 1 && mask <= 8:
-		if _, err := io.CopyN(prefix, b, 1); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 1); err != nil {
+			return nil, err
+		}
 	case mask >= 9 && mask <= 16:
-		if _, err := io.CopyN(prefix, b, 2); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 2); err != nil {
+			return nil, err
+		}
 	case mask >= 17 && mask <= 24:
-		if _, err := io.CopyN(prefix, b, 3); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 3); err != nil {
+			return nil, err
+		}
 	case mask >= 25:
-		if _, err := io.CopyN(prefix, b, 4); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 4); err != nil {
+			return nil, err
+		}
 	}
 
 	for prefix.Len() < 4 {
@@ -464,37 +472,69 @@ func getIPv6Prefix(b *bytes.Buffer, mask uint8) (net.IP, error) {
 
 	switch {
 	case mask >= 1 && mask <= 8:
-		if _, err := io.CopyN(prefix, b, 1); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 1); err != nil {
+			return nil, err
+		}
 	case mask >= 9 && mask <= 16:
-		if _, err := io.CopyN(prefix, b, 2); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 2); err != nil {
+			return nil, err
+		}
 	case mask >= 17 && mask <= 24:
-		if _, err := io.CopyN(prefix, b, 3); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 3); err != nil {
+			return nil, err
+		}
 	case mask >= 25 && mask <= 32:
-		if _, err := io.CopyN(prefix, b, 4); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 4); err != nil {
+			return nil, err
+		}
 	case mask >= 33 && mask <= 40:
-		if _, err := io.CopyN(prefix, b, 5); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 5); err != nil {
+			return nil, err
+		}
 	case mask >= 41 && mask <= 48:
-		if _, err := io.CopyN(prefix, b, 6); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 6); err != nil {
+			return nil, err
+		}
 	case mask >= 49 && mask <= 56:
-		if _, err := io.CopyN(prefix, b, 7); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 7); err != nil {
+			return nil, err
+		}
 	case mask >= 57 && mask <= 64:
-		if _, err := io.CopyN(prefix, b, 8); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 8); err != nil {
+			return nil, err
+		}
 	case mask >= 65 && mask <= 72:
-		if _, err := io.CopyN(prefix, b, 9); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 9); err != nil {
+			return nil, err
+		}
 	case mask >= 73 && mask <= 80:
-		if _, err := io.CopyN(prefix, b, 10); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 10); err != nil {
+			return nil, err
+		}
 	case mask >= 81 && mask <= 88:
-		if _, err := io.CopyN(prefix, b, 11); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 11); err != nil {
+			return nil, err
+		}
 	case mask >= 89 && mask <= 96:
-		if _, err := io.CopyN(prefix, b, 12); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 12); err != nil {
+			return nil, err
+		}
 	case mask >= 97 && mask <= 104:
-		if _, err := io.CopyN(prefix, b, 13); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 13); err != nil {
+			return nil, err
+		}
 	case mask >= 105 && mask <= 112:
-		if _, err := io.CopyN(prefix, b, 14); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 14); err != nil {
+			return nil, err
+		}
 	case mask >= 113 && mask <= 120:
-		if _, err := io.CopyN(prefix, b, 15); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 15); err != nil {
+			return nil, err
+		}
 	case mask >= 121 && mask <= 128:
-		if _, err := io.CopyN(prefix, b, 16); err != nil { return nil, err }
+		if _, err := io.CopyN(prefix, b, 16); err != nil {
+			return nil, err
+		}
 	}
 
 	for prefix.Len() < 16 {
@@ -516,8 +556,6 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 	if err := binary.Read(b, binary.BigEndian, &safi); err != nil {
 		return nil, nil, err
 	}
-	log.Println(afi)
-	log.Println(safi)
 	// In the above, I'm really only supporting IPv6 here. The rest is dependant on which AFI/SAFI
 
 	// If the next-hop length is 32 bytes, we have both a public and link-local
@@ -528,7 +566,6 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 	if err := binary.Read(b, binary.BigEndian, &nhLen); err != nil {
 		return nil, nil, err
 	}
-	log.Println(nhLen)
 
 	nh := bytes.NewBuffer(make([]byte, 0, 16))
 	if _, err := io.CopyN(nh, b, 16); err != nil {

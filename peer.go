@@ -29,6 +29,7 @@ type peer struct {
 	conn          net.Conn
 	eor           bool
 	weor          bool
+	quiet         bool
 	mutex         sync.RWMutex
 	param         parameters
 	rid           bgpid
@@ -41,6 +42,7 @@ type peer struct {
 	out           *bytes.Buffer
 	prefixes      *prefixAttributes
 	rib           routing_table.Rib
+	prefixSet     map[netip.Prefix]struct{}
 }
 
 func (p *peer) peerWorker() {
@@ -242,6 +244,8 @@ func (p *peer) handleUpdate() error {
 		pa.v4EoR = true
 		p.prefixes = &pa
 		p.mutex.Unlock()
+		
+		p.processRibUpdates()
 		return nil
 	}
 
@@ -249,6 +253,8 @@ func (p *peer) handleUpdate() error {
 		p.mutex.Lock()
 		p.prefixes = &pa
 		p.mutex.Unlock()
+		
+		p.processRibUpdates()
 		return nil
 	}
 
@@ -295,6 +301,14 @@ func (p *peer) handleUpdate() error {
 func (p *peer) logUpdate() {
 	// If waiting for EoR and not yet received, output nothing
 	if p.weor && !p.eor {
+		p.mutex.Lock()
+		p.prefixes = nil
+		p.mutex.Unlock()
+		return
+	}
+
+	// In quiet mode, skip per-update logging entirely
+	if p.quiet {
 		p.mutex.Lock()
 		p.prefixes = nil
 		p.mutex.Unlock()
@@ -456,22 +470,52 @@ func (p *peer) processRibUpdates() {
 	// Process withdrawals
 	if len(prefixes.v4Withdraws) > 0 {
 		var v4w []netip.Prefix
+		var v4DelGlobal []netip.Prefix
 		for _, w := range prefixes.v4Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
-				v4w = append(v4w, netip.PrefixFrom(ip, int(w.Mask)))
+				prefix := netip.PrefixFrom(ip, int(w.Mask))
+				v4w = append(v4w, prefix)
+				
+				p.mutex.Lock()
+				delete(p.prefixSet, prefix)
+				p.mutex.Unlock()
+
+				p.server.mutex.RLock()
+				if !p.server.isHeldByOtherPeerLocked(prefix, p) {
+					v4DelGlobal = append(v4DelGlobal, prefix)
+				}
+				p.server.mutex.RUnlock()
 			}
 		}
 		p.rib.DeleteIPv4Batch(v4w)
+		if len(v4DelGlobal) > 0 {
+			p.server.rib.DeleteIPv4Batch(v4DelGlobal)
+		}
 	}
 
 	if len(prefixes.v6Withdraws) > 0 {
 		var v6w []netip.Prefix
+		var v6DelGlobal []netip.Prefix
 		for _, w := range prefixes.v6Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
-				v6w = append(v6w, netip.PrefixFrom(ip, int(w.Mask)))
+				prefix := netip.PrefixFrom(ip, int(w.Mask))
+				v6w = append(v6w, prefix)
+
+				p.mutex.Lock()
+				delete(p.prefixSet, prefix)
+				p.mutex.Unlock()
+
+				p.server.mutex.RLock()
+				if !p.server.isHeldByOtherPeerLocked(prefix, p) {
+					v6DelGlobal = append(v6DelGlobal, prefix)
+				}
+				p.server.mutex.RUnlock()
 			}
 		}
 		p.rib.DeleteIPv6Batch(v6w)
+		if len(v6DelGlobal) > 0 {
+			p.server.rib.DeleteIPv6Batch(v6DelGlobal)
+		}
 	}
 
 	// Process announcements
@@ -482,26 +526,45 @@ func (p *peer) processRibUpdates() {
 			var v4a []routing_table.Route
 			for _, pfx := range prefixes.v4prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
-					v4a = append(v4a, routing_table.Route{
-						Prefix:     netip.PrefixFrom(ip, int(pfx.Mask)),
+					prefix := netip.PrefixFrom(ip, int(pfx.Mask))
+					route := routing_table.Route{
+						Prefix:     prefix,
 						Attributes: ra,
-					})
+					}
+					v4a = append(v4a, route)
+
+					p.mutex.Lock()
+					p.prefixSet[prefix] = struct{}{}
+					p.mutex.Unlock()
 				}
 			}
 			p.rib.InsertIPv4Batch(v4a)
+			p.server.rib.InsertIPv4Batch(v4a)
 		}
 
 		if len(prefixes.v6prefixes) > 0 {
 			var v6a []routing_table.Route
 			for _, pfx := range prefixes.v6prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
-					v6a = append(v6a, routing_table.Route{
-						Prefix:     netip.PrefixFrom(ip, int(pfx.Mask)),
+					prefix := netip.PrefixFrom(ip, int(pfx.Mask))
+					route := routing_table.Route{
+						Prefix:     prefix,
 						Attributes: ra,
-					})
+					}
+					v6a = append(v6a, route)
+
+					p.mutex.Lock()
+					p.prefixSet[prefix] = struct{}{}
+					p.mutex.Unlock()
 				}
 			}
 			p.rib.InsertIPv6Batch(v6a)
+			p.server.rib.InsertIPv6Batch(v6a)
 		}
+	}
+
+	if prefixes.v4EoR || prefixes.v6EoR {
+		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6", 
+			p.ip, p.rib.V4Count(), p.rib.V6Count())
 	}
 }

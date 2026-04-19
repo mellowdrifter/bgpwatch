@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 
 	"github.com/mellowdrifter/routing_table"
@@ -25,13 +26,16 @@ type bgpWatchServer struct {
 	listener net.Listener
 	peers    []*peer
 	mutex    sync.RWMutex
+	rib      routing_table.Rib
 }
 
 type config struct {
-	rid     bgpid
-	port    int
-	logfile string
-	eor     bool
+	rid      bgpid
+	port     int
+	grpcPort int
+	logfile  string
+	eor      bool
+	quiet    bool
 }
 
 func main() {
@@ -39,9 +43,11 @@ func main() {
 	srid := flag.String("rid", "0.0.0.1", "router id")
 	logs := flag.String("log", "", "log location, stdout if not given")
 	port := flag.Int("port", 179, "listen port")
+	grpcPort := flag.Int("grpc", 1179, "gRPC listen port")
 	weor := flag.Bool("endofrib", false, "log updates only when EoR received")
+	quiet := flag.Bool("quiet", false, "suppress per-update logging, show only periodic stats")
 	flag.Parse()
-	conf := getConfig(srid, logs, port, weor)
+	conf := getConfig(srid, logs, port, grpcPort, weor, quiet)
 
 	// Set up log file
 	if conf.logfile != "" {
@@ -58,23 +64,27 @@ func main() {
 	// Start server
 	serv := bgpWatchServer{
 		mutex: sync.RWMutex{},
+		rib:   routing_table.GetNewRib(),
 	}
 	serv.listen(conf)
 	go serv.clean()
+	go serv.startGRPC(conf.grpcPort)
 	serv.start(conf)
 }
 
-func getConfig(srid, logf *string, port *int, eor *bool) config {
+func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet *bool) config {
 	rid, err := getRid(srid)
 	if err != nil {
 		log.Fatalf("Unable to convert %s to RID format: %v", *srid, err)
 	}
 
 	return config{
-		rid:     rid,
-		port:    *port,
-		logfile: *logf,
-		eor:     *eor,
+		rid:      rid,
+		port:     *port,
+		grpcPort: *grpcPort,
+		logfile:  *logf,
+		eor:      *eor,
+		quiet:    *quiet,
 	}
 }
 
@@ -126,7 +136,6 @@ func (s *bgpWatchServer) clean() {
 	ticker := time.NewTicker(30 * time.Second)
 	for range ticker.C {
 		s.mutex.RLock()
-		log.Printf("I have %d clients connected\n", len(s.peers))
 		now := time.Now()
 		var dead []*peer
 		for _, p := range s.peers {
@@ -175,11 +184,13 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 		conn:      conn,
 		rid:       c.rid,
 		weor:      c.eor,
+		quiet:    c.quiet,
 		ip:        ip,
 		out:       bytes.NewBuffer(make([]byte, 4096)),
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
 		rib:       routing_table.GetNewRib(),
+		prefixSet: make(map[netip.Prefix]struct{}),
 	}
 
 	s.peers = append(s.peers, peer)
@@ -206,4 +217,49 @@ func (s *bgpWatchServer) remove(p *peer) {
 	// Don't worry about errors as it's mostly because it's already closed.
 	p.conn.Close()
 
+	// Batch delete unique prefixes from the global RIB
+	var v4Del []netip.Prefix
+	var v6Del []netip.Prefix
+
+	p.mutex.RLock()
+	for prefix := range p.prefixSet {
+		if !s.isHeldByOtherPeerLocked(prefix, p) {
+			if prefix.Addr().Is4() {
+				v4Del = append(v4Del, prefix)
+			} else {
+				v6Del = append(v6Del, prefix)
+			}
+		}
+	}
+	p.mutex.RUnlock()
+
+	if len(v4Del) > 0 {
+		s.rib.DeleteIPv4Batch(v4Del)
+	}
+	if len(v6Del) > 0 {
+		s.rib.DeleteIPv6Batch(v6Del)
+	}
+
+	// Clean up peer's memory
+	p.mutex.Lock()
+	p.prefixSet = nil
+	p.rib = routing_table.Rib{}
+	p.mutex.Unlock()
+}
+
+// isHeldByOtherPeerLocked checks if any peer other than the excluded one holds the prefix.
+// MUST be called with s.mutex held (at least RLock).
+func (s *bgpWatchServer) isHeldByOtherPeerLocked(prefix netip.Prefix, exclude *peer) bool {
+	for _, p := range s.peers {
+		if p == exclude {
+			continue
+		}
+		p.mutex.RLock()
+		_, exists := p.prefixSet[prefix]
+		p.mutex.RUnlock()
+		if exists {
+			return true
+		}
+	}
+	return false
 }
