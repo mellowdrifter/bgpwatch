@@ -144,7 +144,6 @@ func (p *peer) HandleKeepalive() {
 }
 
 func (p *peer) HandleOpen() {
-	defer p.mutex.Unlock()
 	log.Println("Received Open Message")
 	var o msgOpen
 	binary.Read(p.in, binary.BigEndian, &o)
@@ -153,13 +152,15 @@ func (p *peer) HandleOpen() {
 	pbuffer := make([]byte, int(o.ParamLen))
 	io.ReadFull(p.in, pbuffer)
 
+	params := decodeOptionalParameters(&pbuffer)
+
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
 	// Grab the ASN and Hold Time.
 	p.asn = o.ASN
 	p.holdtime = o.HoldTime
-
-	p.mutex.Lock()
-	p.param = decodeOptionalParameters(&pbuffer)
-
+	p.param = params
 }
 
 func (p *peer) handleNotification() {
