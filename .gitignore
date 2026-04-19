@@ -2,3 +2,4 @@ bgpwatch
 go.sum
 proto/bgpwatch_grpc.pb.go
 proto/bgpwatch.pb.go
+go.sum

@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
+	"strings"
 
+	"github.com/mellowdrifter/bogons"
+	"github.com/mellowdrifter/routing_table"
 	pb "github.com/mellowdrifter/bgpwatch/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 type grpcServer struct {
@@ -69,6 +75,107 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 		TotalRamBytes: totalRam,
 		PeerRamBytes:  peerRam,
 	}, nil
+}
+
+// GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
+// The address field is parsed server-side: if it contains a "/" it is treated
+// as an exact prefix match, otherwise as a longest prefix match.
+// Bogon addresses are rejected before lookup.
+func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.RouteResponse, error) {
+	addr := strings.TrimSpace(in.GetAddress())
+	if addr == "" {
+		return nil, status.Error(codes.InvalidArgument, "address is required")
+	}
+
+	var route *routing_table.Route
+
+	if strings.Contains(addr, "/") {
+		// Exact prefix match mode
+		prefix, err := netip.ParsePrefix(addr)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid prefix %q: %v", addr, err)
+		}
+		prefix = prefix.Masked()
+
+		// Bogon check on the prefix address
+		ip := prefix.Addr()
+		if !bogons.IsPublicIP(ip.AsSlice()) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
+		}
+
+		if ip.Is4() {
+			route = g.bgp.rib.LookupIPv4(prefix)
+		} else {
+			route = g.bgp.rib.LookupIPv6(prefix)
+		}
+	} else {
+		// Longest prefix match mode
+		ip, err := netip.ParseAddr(addr)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
+		}
+
+		// Bogon check
+		if !bogons.IsPublicIP(ip.AsSlice()) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
+		}
+
+		if ip.Is4() {
+			route = g.bgp.rib.SearchIPv4(ip)
+		} else {
+			route = g.bgp.rib.SearchIPv6(ip)
+		}
+	}
+
+	// Not found — return a clean response with found=false
+	if route == nil {
+		return &pb.RouteResponse{Found: false}, nil
+	}
+
+	return &pb.RouteResponse{
+		Found:            true,
+		Prefix:           route.Prefix.String(),
+		AsPath:           formatRouteASPath(route.Attributes.AsPath),
+		LocalPref:        route.Attributes.LocalPref,
+		Communities:      formatRouteCommunities(route.Attributes.Communities),
+		LargeCommunities: formatRouteLargeCommunities(route.Attributes.LargeCommunities),
+	}, nil
+}
+
+// formatRouteASPath renders an AS path slice as a space-separated string.
+func formatRouteASPath(asPath []uint32) string {
+	if len(asPath) == 0 {
+		return ""
+	}
+	parts := make([]string, len(asPath))
+	for i, asn := range asPath {
+		parts[i] = fmt.Sprintf("%d", asn)
+	}
+	return strings.Join(parts, " ")
+}
+
+// formatRouteCommunities renders standard BGP communities as "high:low" strings.
+func formatRouteCommunities(communities []uint32) []string {
+	if len(communities) == 0 {
+		return nil
+	}
+	result := make([]string, len(communities))
+	for i, c := range communities {
+		result[i] = fmt.Sprintf("%d:%d", c>>16, c&0xFFFF)
+	}
+	return result
+}
+
+// formatRouteLargeCommunities renders large communities as "admin:high:low" strings.
+func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []string {
+	if len(lc) == 0 {
+		return nil
+	}
+	result := make([]string, len(lc))
+	for i, c := range lc {
+		result[i] = fmt.Sprintf("%d:%d:%d", c.GlobalAdmin, c.LocalData1, c.LocalData2)
+	}
+	return result
 }
 
 func (s *bgpWatchServer) startGRPC(port int) {
