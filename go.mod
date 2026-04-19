@@ -5,12 +5,12 @@ go 1.26.2
 require (
 	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.7.0
+	github.com/mellowdrifter/bogons v1.0.0
 	github.com/mellowdrifter/routing_table v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.80.0
 )
 
 require (
-	github.com/mellowdrifter/bogons v1.0.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect

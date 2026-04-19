@@ -45,6 +45,17 @@ message SystemStatsResponse {
   map<string, uint64> peer_ram_bytes = 2;
 }
 
+// OriginRequest specifies an ASN to query for originated prefixes.
+message OriginRequest {
+  uint32 asn = 1;
+}
+
+// OriginResponse contains all prefixes originated by the requested ASN.
+message OriginResponse {
+  repeated string ipv4_prefixes = 1;
+  repeated string ipv6_prefixes = 2;
+}
+
 service BGPWatch {
   // GetTotals returns the total number of IPv4 and IPv6 prefixes across all peers.
   rpc GetTotals(Empty) returns (TotalsResponse);
@@ -57,4 +68,7 @@ service BGPWatch {
 
   // GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
   rpc GetRoute(RouteRequest) returns (RouteResponse);
+
+  // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
+  rpc GetPrefixesByOrigin(OriginRequest) returns (OriginResponse);
 }

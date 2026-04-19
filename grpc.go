@@ -178,6 +178,36 @@ func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []string {
 	return result
 }
 
+// GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
+// The origin ASN is the last ASN in the AS path. Bogon ASNs are rejected.
+func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.OriginResponse, error) {
+	asn := in.GetAsn()
+	if asn == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ASN is required")
+	}
+
+	if !bogons.ValidPublicASN(asn) {
+		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
+	}
+
+	v4prefixes, v6prefixes := g.bgp.rib.PrefixesByOriginASN(asn)
+
+	v4strs := make([]string, len(v4prefixes))
+	for i, p := range v4prefixes {
+		v4strs[i] = p.String()
+	}
+
+	v6strs := make([]string, len(v6prefixes))
+	for i, p := range v6prefixes {
+		v6strs[i] = p.String()
+	}
+
+	return &pb.OriginResponse{
+		Ipv4Prefixes: v4strs,
+		Ipv6Prefixes: v6strs,
+	}, nil
+}
+
 func (s *bgpWatchServer) startGRPC(port int) {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
