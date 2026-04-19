@@ -13,6 +13,8 @@ import (
 	"log"
 	"net"
 	"os"
+
+	"github.com/mellowdrifter/routing_table"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,6 +179,7 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 		out:       bytes.NewBuffer(make([]byte, 4096)),
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
+		rib:       routing_table.GetNewRib(),
 	}
 
 	s.peers = append(s.peers, peer)

@@ -7,8 +7,11 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
+
+	"github.com/mellowdrifter/routing_table"
 )
 
 var (
@@ -37,6 +40,7 @@ type peer struct {
 	in            *bytes.Reader
 	out           *bytes.Buffer
 	prefixes      *prefixAttributes
+	rib           routing_table.Rib
 }
 
 func (p *peer) peerWorker() {
@@ -275,11 +279,15 @@ func (p *peer) handleUpdate() error {
 		pa.v6prefixes = pa.attr.ipv6NLRI
 		pa.v6NextHops = pa.attr.nextHopsv6
 		pa.v6EoR = pa.attr.v6EoR
+		pa.v6Withdraws = pa.attr.v6Withdraws
 	}
 
 	p.mutex.Lock()
 	p.prefixes = &pa
 	p.mutex.Unlock()
+
+	p.processRibUpdates()
+
 	return nil
 }
 
@@ -403,4 +411,97 @@ func (p *peer) logUpdate() {
 	p.mutex.Lock()
 	p.prefixes = nil
 	p.mutex.Unlock()
+}
+
+func mapAttributes(pa *pathAttr) *routing_table.RouteAttributes {
+	if pa == nil {
+		return &routing_table.RouteAttributes{}
+	}
+
+	ra := &routing_table.RouteAttributes{
+		LocalPref: pa.localPref,
+	}
+
+	// Extract AS sequence only, ignoring AS_SET (type 1)
+	for _, seg := range pa.aspath {
+		if seg.Type == 2 { // AS_SEQUENCE
+			ra.AsPath = append(ra.AsPath, seg.ASN)
+		}
+	}
+
+	for _, c := range pa.communities {
+		ra.Communities = append(ra.Communities, (uint32(c.High)<<16)|uint32(c.Low))
+	}
+
+	for _, lc := range pa.largeCommunities {
+		ra.LargeCommunities = append(ra.LargeCommunities, routing_table.LargeCommunity{
+			GlobalAdmin: lc.Admin,
+			LocalData1:  lc.High,
+			LocalData2:  lc.Low,
+		})
+	}
+
+	return ra
+}
+
+func (p *peer) processRibUpdates() {
+	p.mutex.RLock()
+	prefixes := p.prefixes
+	p.mutex.RUnlock()
+
+	if prefixes == nil {
+		return
+	}
+
+	// Process withdrawals
+	if len(prefixes.v4Withdraws) > 0 {
+		var v4w []netip.Prefix
+		for _, w := range prefixes.v4Withdraws {
+			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
+				v4w = append(v4w, netip.PrefixFrom(ip, int(w.Mask)))
+			}
+		}
+		p.rib.DeleteIPv4Batch(v4w)
+	}
+
+	if len(prefixes.v6Withdraws) > 0 {
+		var v6w []netip.Prefix
+		for _, w := range prefixes.v6Withdraws {
+			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
+				v6w = append(v6w, netip.PrefixFrom(ip, int(w.Mask)))
+			}
+		}
+		p.rib.DeleteIPv6Batch(v6w)
+	}
+
+	// Process announcements
+	if prefixes.attr != nil && (len(prefixes.v4prefixes) > 0 || len(prefixes.v6prefixes) > 0) {
+		ra := mapAttributes(prefixes.attr)
+
+		if len(prefixes.v4prefixes) > 0 {
+			var v4a []routing_table.Route
+			for _, pfx := range prefixes.v4prefixes {
+				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
+					v4a = append(v4a, routing_table.Route{
+						Prefix:     netip.PrefixFrom(ip, int(pfx.Mask)),
+						Attributes: ra,
+					})
+				}
+			}
+			p.rib.InsertIPv4Batch(v4a)
+		}
+
+		if len(prefixes.v6prefixes) > 0 {
+			var v6a []routing_table.Route
+			for _, pfx := range prefixes.v6prefixes {
+				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
+					v6a = append(v6a, routing_table.Route{
+						Prefix:     netip.PrefixFrom(ip, int(pfx.Mask)),
+						Attributes: ra,
+					})
+				}
+			}
+			p.rib.InsertIPv6Batch(v6a)
+		}
+	}
 }

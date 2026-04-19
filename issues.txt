@@ -1,0 +1,58 @@
+1. Critical Denial of Service (Panic on Malformed Header)
+In peer.go, getMessage() calculates the remainder of the BGP packet using the length field from the header:
+len := getMessageLength(header[16:]) - 18
+buffer := make([]byte, len)
+
+The Bug: The BGP minimum message size is 19 bytes, but a malicious or misconfigured peer could send a BGP length field smaller than 18 (e.g., 0). This results in len being negative. Calling make([]byte, -18) will immediately throw a runtime panic (makeslice: len out of range), crashing the entire BGP daemon.
+
+2. Dropping Valid BGP Updates
+In peer.go, the handleUpdate() method has a major logic flaw when dealing with IPv4 withdraws:
+if withdraw != 0 {
+    wbuf := make([]byte, withdraw)
+    io.ReadFull(p.in, wbuf)
+    p.mutex.Lock()
+    p.prefixes = decodeIPv4Withdraws(wbuf)
+    p.mutex.Unlock()
+    return // <--- BUG!
+}
+
+The Bug: According to BGP RFC 4271, a single UPDATE message can contain both withdrawn routes AND newly announced routes (NLRI). By explicitly returning after handling the withdraws, the daemon completely ignores and drops any path attributes or new prefixes announced in the same packet.
+
+3. AS_PATH Parsing Logic Bug
+In attributes.go, decodePathAttributes() tries to handle multiple AS_PATH segments (e.g., an AS_SEQUENCE followed by an AS_SET):
+case tcASPath:
+    pa.aspath = append(pa.aspath, decodeASPath(buf)...)
+    // Could have both AS_SEQ and AS_SET
+    if r.Len() != 0 {
+        pa.aspath = append(pa.aspath, decodeASPath(buf)...)
+    }
+
+The Bug: r is the reader for the entire path attributes block, not the local buf holding the AS_PATH attribute. Because it checks r.Len() != 0, it means "if there are other BGP attributes after this AS_PATH". If true, it tries to parse a second segment from buf, which might be empty or valid. If there are no attributes after AS_PATH, it ignores the remainder of buf entirely. It should be checking if buf.Len() != 0.
+
+4. Connection & Memory Leaks
+- Infinite Peer Growth: The handleNotification() function logs a disconnect and closes the connection but never removes the peer from bgpWatchServer.peers. The daemon's clean() method also has a TODO: Make this work note and does nothing but sleep once. This means your slice of peers will grow infinitely in memory every time a session bounces.
+- Socket Leak: In peerWorker(), if p.getType() encounters an error, the goroutine returns immediately without calling p.conn.Close(), leaving an orphaned open TCP socket.
+
+5. Unsafe Slice Deletion
+In bgpwatch.go, the remove(p *peer) method deletes a peer while iterating over the slice:
+for i, check := range s.peers {
+    if check == p {
+        s.peers = append(s.peers[:i], s.peers[i+1:]...)
+    }
+}
+
+The Bug: Using append to delete an element modifies the underlying array in-place. Because it doesn't break out of the loop after deletion, the next iterations of the loop will evaluate shifted indexes, causing it to skip evaluating certain peers completely. 
+
+6. Mutex Panic Risk
+In peer.go, HandleOpen() attempts to lock and unlock a mutex:
+func (p *peer) HandleOpen() {
+    defer p.mutex.Unlock()
+    // ... code ...
+    p.mutex.Lock()
+    p.param = decodeOptionalParameters(&pbuffer)
+}
+
+The Bug: The defer p.mutex.Unlock() is executed at the very beginning of the function, but p.mutex.Lock() is executed at the end. If io.ReadFull(p.in, pbuffer) happens to panic (due to a malformed packet), the function will exit, and the deferred Unlock() will execute on an unlocked mutex. This throws a fatal sync: unlock of unlocked mutex panic. Additionally, shared state like p.asn is mutated without holding the lock.
+
+7. Unchecked Errors (Silent Failures)
+Throughout the codebase (especially in attributes.go and encode.go), there are dozens of calls to binary.Read and io.CopyN where the returned error (such as EOF) is completely ignored. If a peer sends a truncated/malformed packet, the daemon will silently fill the variables with 0s and attempt to process garbage data rather than logging an error and dropping the session.

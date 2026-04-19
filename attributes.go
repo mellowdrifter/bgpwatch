@@ -90,6 +90,7 @@ type pathAttr struct {
 	extendCommunities []extendCommunity
 	nextHopsv6        []string
 	ipv6NLRI          []v6Addr
+	v6Withdraws       []v6Addr
 	v6EoR             bool
 }
 
@@ -189,7 +190,7 @@ func decodePathAttributes(attr []byte, ap []addr) (*pathAttr, error) {
 		case tcMPReachNLRI:
 			pa.ipv6NLRI, pa.nextHopsv6, err = decodeMPReachNLRI(buf, ap)
 		case tcMPUnreachNLRI:
-			pa.v6EoR, err = decodeMPUnreachNLRI(buf, 3)
+			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len)
 		case tcCommunity:
 			pa.communities, err = decodeCommunities(buf, len)
 		case tcLargeCommunity:
@@ -562,12 +563,20 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 
 }
 
-// TODO: finish this off...
-func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) (bool, error) {
+// Decodes IPv6 withdrawals (MP_UNREACH_NLRI)
+func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) (bool, []v6Addr, error) {
 	if len == 3 {
-		return true, nil
+		// Just AFI (2 bytes) and SAFI (1 byte), no NLRI => End of RIB
+		b.Next(3)
+		return true, nil, nil
 	}
-	return false, nil
+
+	// Skip AFI / SAFI
+	b.Next(3)
+
+	// Decode the rest as withdrawn prefixes
+	nlri, err := decodeIPv6NLRI(b, nil)
+	return false, nlri, err
 }
 
 func decodeIPv4Withdraws(wd []byte) (*prefixAttributes, error) {
