@@ -119,10 +119,32 @@ func (s *bgpWatchServer) start(conf config) {
 	}
 }
 
-// TODO: Make this work, and remove old clients
+// clean checks for and removes stale clients that haven't sent a keepalive within their holdtime.
 func (s *bgpWatchServer) clean() {
-	time.Sleep(5 * time.Second)
-	log.Printf("I have %d clients connected\n", len(s.peers))
+	ticker := time.NewTicker(30 * time.Second)
+	for range ticker.C {
+		s.mutex.RLock()
+		log.Printf("I have %d clients connected\n", len(s.peers))
+		now := time.Now()
+		var dead []*peer
+		for _, p := range s.peers {
+			p.mutex.RLock()
+			if p.holdtime > 0 && !p.lastKeepalive.IsZero() {
+				if now.Sub(p.lastKeepalive) > time.Duration(p.holdtime)*time.Second {
+					dead = append(dead, p)
+				}
+			}
+			p.mutex.RUnlock()
+		}
+		s.mutex.RUnlock()
+
+		for _, p := range dead {
+			log.Printf("Holdtimer expired for %s", p.conn.RemoteAddr().String())
+			// Closing connection will cause getMessage in peerWorker to error and return,
+			// which then triggers the deferred p.server.remove(p).
+			p.conn.Close()
+		}
+	}
 }
 
 // accept adds a new client to the current list of clients being served.
@@ -136,9 +158,10 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 
 	// If new client trying to connect with existing connection, remove old peer from pool
-	for _, peer := range s.peers {
-		if ip == peer.ip {
-			s.remove(peer)
+	for i, check := range s.peers {
+		if ip == check.ip {
+			check.conn.Close()
+			s.peers = append(s.peers[:i], s.peers[i+1:]...)
 			break
 		}
 	}
@@ -146,6 +169,7 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 	// Each client will have a buffer with the maximum BGP message size. This is only
 	// 4k per client, so it's not a big deal.
 	peer := &peer{
+		server:    s,
 		conn:      conn,
 		rid:       c.rid,
 		weor:      c.eor,
@@ -166,10 +190,14 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 func (s *bgpWatchServer) remove(p *peer) {
 	log.Printf("Removing dead peer %s\n", p.conn.RemoteAddr().String())
 
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	// remove the connection from client array
 	for i, check := range s.peers {
 		if check == p {
 			s.peers = append(s.peers[:i], s.peers[i+1:]...)
+			break
 		}
 	}
 	// Don't worry about errors as it's mostly because it's already closed.

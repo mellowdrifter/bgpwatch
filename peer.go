@@ -19,6 +19,7 @@ var (
 )
 
 type peer struct {
+	server        *bgpWatchServer
 	asn           uint16
 	holdtime      uint16
 	ip            string
@@ -39,6 +40,7 @@ type peer struct {
 }
 
 func (p *peer) peerWorker() {
+	defer p.server.remove(p)
 	for {
 
 		// Grab incoming BGP message and place into a reader.
