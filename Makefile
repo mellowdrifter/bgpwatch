@@ -17,3 +17,12 @@ test:
 clean:
 	go clean
 	rm -f $(BINARY_NAME)
+
+fuzz:
+	go test -fuzz=FuzzDecodePathAttributes -fuzztime 20s
+	go test -fuzz=FuzzDecodeIPv4Withdraws -fuzztime 20s
+	go test -fuzz=FuzzDecodeIPv4NLRI -fuzztime 20s
+	go test -fuzz=FuzzDecodeIPv6NLRI -fuzztime 20s
+	go test -fuzz=FuzzDecodeMPReachNLRI -fuzztime 20s
+	go test -fuzz=FuzzDecodeMPUnreachNLRI -fuzztime 20s
+	go test -fuzz=FuzzDecodeOptionalParameters -fuzztime 20s
