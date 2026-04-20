@@ -40,6 +40,13 @@ message RouteResponse {
   repeated string large_communities = 6;
 }
 
+message PeerStats {
+  uint64 established_duration_seconds = 1;
+  uint64 total_advertisements = 2;
+  uint64 total_withdrawals = 3;
+  uint64 rib_ram_bytes = 4;
+}
+
 message SystemStatsResponse {
   uint64 total_app_ram_bytes = 1;
   uint64 heap_alloc_bytes = 2;
@@ -48,7 +55,7 @@ message SystemStatsResponse {
   uint64 heap_released_bytes = 5;
   uint32 num_gc = 6;
   uint64 global_rib_ram_bytes = 7;
-  map<string, uint64> peer_ram_bytes = 8;
+  map<string, PeerStats> peer_stats = 8;
 }
 
 // OriginRequest specifies an ASN to query for originated prefixes.

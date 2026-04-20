@@ -37,7 +37,8 @@ type peer struct {
 	lastKeepalive time.Time
 	updates       uint64
 	withdraws     uint64
-	startTime     time.Time
+	startTime       time.Time
+	establishedTime time.Time
 	in            *bytes.Reader
 	out           *bytes.Buffer
 	prefixes      *prefixAttributes
@@ -193,6 +194,9 @@ func (p *peer) HandleOpen() error {
 	p.asn = o.ASN
 	p.holdtime = o.HoldTime
 	p.param = params
+	if p.establishedTime.IsZero() {
+		p.establishedTime = time.Now()
+	}
 	return nil
 }
 
@@ -466,6 +470,11 @@ func (p *peer) processRibUpdates() {
 	if prefixes == nil {
 		return
 	}
+
+	p.mutex.Lock()
+	p.withdraws += uint64(len(prefixes.v4Withdraws) + len(prefixes.v6Withdraws))
+	p.updates += uint64(len(prefixes.v4prefixes) + len(prefixes.v6prefixes))
+	p.mutex.Unlock()
 
 	// Process withdrawals
 	if len(prefixes.v4Withdraws) > 0 {

@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mellowdrifter/bogons"
 	"github.com/mellowdrifter/routing_table"
@@ -68,22 +69,36 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 	globalRam := globalMem.RoutingTablesEffective + globalMem.RoutingTablesOverhead +
 		globalMem.RouteAttributesEffective + globalMem.RouteAttributesOverhead
 
-	peerRam := make(map[string]uint64)
+	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range g.bgp.peers {
+		p.mutex.RLock()
 		pmem := p.rib.MemoryUsage()
-		peerRam[p.ip] = pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
+		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
 			pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
+
+		var duration uint64
+		if !p.establishedTime.IsZero() {
+			duration = uint64(time.Since(p.establishedTime).Seconds())
+		}
+
+		peerStats[p.ip] = &pb.PeerStats{
+			EstablishedDurationSeconds: duration,
+			TotalAdvertisements:        p.updates,
+			TotalWithdrawals:           p.withdraws,
+			RibRamBytes:                peerRam,
+		}
+		p.mutex.RUnlock()
 	}
 
 	return &pb.SystemStatsResponse{
-		TotalAppRamBytes:    m.Sys,
-		HeapAllocBytes:      m.HeapAlloc,
-		HeapSysBytes:        m.HeapSys,
-		HeapIdleBytes:       m.HeapIdle,
-		HeapReleasedBytes:   m.HeapReleased,
-		NumGc:               m.NumGC,
-		GlobalRibRamBytes:   globalRam,
-		PeerRamBytes:        peerRam,
+		TotalAppRamBytes:  m.Sys,
+		HeapAllocBytes:    m.HeapAlloc,
+		HeapSysBytes:      m.HeapSys,
+		HeapIdleBytes:     m.HeapIdle,
+		HeapReleasedBytes: m.HeapReleased,
+		NumGc:             m.NumGC,
+		GlobalRibRamBytes: globalRam,
+		PeerStats:         peerStats,
 	}, nil
 }
 
