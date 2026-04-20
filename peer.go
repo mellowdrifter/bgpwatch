@@ -123,7 +123,7 @@ func getMessage(c net.Conn) ([]byte, error) {
 	}
 
 	// Check for BGP marker
-	if bytes.Compare(header[:16], bgpMarker) != 0 {
+	if !bytes.Equal(header[:16], bgpMarker) {
 		return nil, fmt.Errorf("Packet is not a BGP packet as does not have the marker present")
 	}
 

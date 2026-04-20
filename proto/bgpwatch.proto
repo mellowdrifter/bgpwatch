@@ -41,8 +41,14 @@ message RouteResponse {
 }
 
 message SystemStatsResponse {
-  uint64 total_ram_bytes = 1;
-  map<string, uint64> peer_ram_bytes = 2;
+  uint64 total_app_ram_bytes = 1;
+  uint64 heap_alloc_bytes = 2;
+  uint64 heap_sys_bytes = 3;
+  uint64 heap_idle_bytes = 4;
+  uint64 heap_released_bytes = 5;
+  uint32 num_gc = 6;
+  uint64 global_rib_ram_bytes = 7;
+  map<string, uint64> peer_ram_bytes = 8;
 }
 
 // OriginRequest specifies an ASN to query for originated prefixes.

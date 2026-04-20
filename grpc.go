@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"runtime"
 	"strings"
 
 	"github.com/mellowdrifter/bogons"
@@ -60,8 +61,11 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 	g.bgp.mutex.RLock()
 	defer g.bgp.mutex.RUnlock()
 
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
 	globalMem := g.bgp.rib.MemoryUsage()
-	totalRam := globalMem.RoutingTablesEffective + globalMem.RoutingTablesOverhead +
+	globalRam := globalMem.RoutingTablesEffective + globalMem.RoutingTablesOverhead +
 		globalMem.RouteAttributesEffective + globalMem.RouteAttributesOverhead
 
 	peerRam := make(map[string]uint64)
@@ -72,8 +76,14 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 	}
 
 	return &pb.SystemStatsResponse{
-		TotalRamBytes: totalRam,
-		PeerRamBytes:  peerRam,
+		TotalAppRamBytes:    m.Sys,
+		HeapAllocBytes:      m.HeapAlloc,
+		HeapSysBytes:        m.HeapSys,
+		HeapIdleBytes:       m.HeapIdle,
+		HeapReleasedBytes:   m.HeapReleased,
+		NumGc:               m.NumGC,
+		GlobalRibRamBytes:   globalRam,
+		PeerRamBytes:        peerRam,
 	}, nil
 }
 

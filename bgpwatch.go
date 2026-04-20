@@ -16,6 +16,7 @@ import (
 	"os"
 
 	"github.com/mellowdrifter/routing_table"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,8 +52,14 @@ func main() {
 	quiet := flag.Bool("quiet", false, "suppress per-update logging, show only periodic stats")
 	ignoreComms := flag.Bool("ignore-communities", false, "ignore and discard BGP communities and large communities")
 	configFile := flag.String("config", "", "path to JSON configuration file containing peer IPs and MD5 passwords")
+	gcPercent := flag.Int("gogc", 100, "set the garbage collection target percentage (default 100)")
 	flag.Parse()
 	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms, configFile)
+
+	if *gcPercent != 100 {
+		debug.SetGCPercent(*gcPercent)
+		log.Printf("GOGC set to %d\n", *gcPercent)
+	}
 
 	// Set up log file
 	if conf.logfile != "" {
