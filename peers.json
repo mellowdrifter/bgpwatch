@@ -1,0 +1,19 @@
+{
+    "peers": [
+        {
+            "ip": "192.168.1.10",
+            "password": "my_super_secret_bgp_password"
+        },
+        {
+            "ip": "10.0.0.5",
+            "password": "another_md5_password"
+        },
+        {
+            "ip": "2001:db8::1",
+            "password": "ipv6_password"
+        },
+        {
+            "ip": "172.16.0.2"
+        }
+    ]
+}
