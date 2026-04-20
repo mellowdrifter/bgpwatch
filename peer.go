@@ -23,7 +23,9 @@ var (
 
 type peer struct {
 	server        *bgpWatchServer
-	asn           uint16
+	asn           uint16 // deprecated
+	peerAsn       uint32
+	isIBGP        bool
 	holdtime      uint16
 	ip            string
 	conn          net.Conn
@@ -191,9 +193,22 @@ func (p *peer) HandleOpen() error {
 	defer p.mutex.Unlock()
 
 	// Grab the ASN and Hold Time.
-	p.asn = o.ASN
+	p.peerAsn = uint32(o.ASN)
 	p.holdtime = o.HoldTime
 	p.param = params
+
+	if isASN32(params.ASN32) {
+		p.peerAsn = binary.BigEndian.Uint32(params.ASN32[:])
+	}
+
+	if p.peerAsn == p.server.conf.asn {
+		p.isIBGP = true
+		log.Printf("iBGP session established with peer %s (AS %d)\n", p.ip, p.peerAsn)
+	} else {
+		p.isIBGP = false
+		log.Printf("eBGP session established with peer %s (AS %d)\n", p.ip, p.peerAsn)
+	}
+
 	if p.establishedTime.IsZero() {
 		p.establishedTime = time.Now()
 	}

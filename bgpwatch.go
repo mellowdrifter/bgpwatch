@@ -40,6 +40,7 @@ type config struct {
 	quiet             bool
 	ignoreCommunities bool
 	peersConfig       map[string]PeerConfig
+	asn               uint32
 }
 
 func main() {
@@ -53,8 +54,9 @@ func main() {
 	ignoreComms := flag.Bool("ignore-communities", false, "ignore and discard BGP communities and large communities")
 	configFile := flag.String("config", "", "path to JSON configuration file containing peer IPs and MD5 passwords")
 	gcPercent := flag.Int("gogc", 100, "set the garbage collection target percentage (default 100)")
+	asn := flag.Uint("asn", 64533, "my autonomous system number")
 	flag.Parse()
-	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms, configFile)
+	conf := getConfig(srid, logs, port, grpcPort, weor, quiet, ignoreComms, configFile, asn)
 
 	if *gcPercent != 100 {
 		debug.SetGCPercent(*gcPercent)
@@ -85,7 +87,7 @@ func main() {
 	serv.start(conf)
 }
 
-func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms *bool, configFile *string) config {
+func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms *bool, configFile *string, asn *uint) config {
 	rid, err := getRid(srid)
 	if err != nil {
 		log.Fatalf("Unable to convert %s to RID format: %v", *srid, err)
@@ -108,6 +110,7 @@ func getConfig(srid, logf *string, port, grpcPort *int, eor, quiet, ignoreComms 
 		quiet:             *quiet,
 		ignoreCommunities: *ignoreComms,
 		peersConfig:       peersMap,
+		asn:               uint32(*asn),
 	}
 }
 

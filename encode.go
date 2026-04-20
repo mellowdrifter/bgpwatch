@@ -108,22 +108,22 @@ func (p *peer) createOpen() {
 	// Need to convert both ASN and Holdtime to [2]byte. Another function?
 	// First two bytes zero as they will be updated to contain the length later
 	p.out.Write([]byte{0, 0, open, bgpVersion})
-	p.out.Write(getOpenASN(p.asn))
+	p.out.Write(getOpenASN(p.server.conf.asn))
 	p.out.Write(uint16ToByte(p.holdtime))
 	p.out.Write(p.rid[:])
 
 	// Add parameters
-	param, len := createParameters(&p.param, p.asn)
+	param, len := createParameters(&p.param, p.server.conf.asn)
 	p.out.Write([]byte{len})
 	p.out.Write(param)
 }
 
-func getOpenASN(asn uint16) []byte {
+func getOpenASN(asn uint32) []byte {
 	// If 32bit ASN, open message will contain AS23456
-	if asn == 23456 {
+	if asn > 65535 {
 		return []byte{0x5b, 0xa0}
 	}
-	return uint16ToByte(asn)
+	return uint16ToByte(uint16(asn))
 }
 
 func uint16ToByte(i uint16) []byte {
@@ -141,7 +141,7 @@ func uint32ToByte(i uint32) []byte {
 }
 
 //TODO: Buggy, test!
-func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
+func createParameters(p *parameters, asn uint32) ([]byte, uint8) {
 	var param []byte
 
 	initial := []byte{
@@ -155,12 +155,7 @@ func createParameters(p *parameters, asn uint16) ([]byte, uint8) {
 	param = append(param, initial...)
 
 	// TODO: Test this both on real router and test code
-	if isASN32(p.ASN32) {
-		param = append(param, p.ASN32[:]...)
-	} else {
-		param = append(param, 0, 0)
-		param = append(param, uint16ToByte(asn)...)
-	}
+	param = append(param, uint32ToByte(asn)...)
 
 	// Only advertise the AF family that the peer sends us
 	for _, a := range p.AddrFamilies {
