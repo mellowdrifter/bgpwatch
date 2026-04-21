@@ -115,7 +115,7 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 // The address field is parsed server-side: if it contains a "/" it is treated
 // as an exact prefix match, otherwise as a longest prefix match.
 // Bogon addresses are rejected before lookup.
-func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.RouteResponse, error) {
+func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.RouteLookupResponse, error) {
 	addr := strings.TrimSpace(in.GetAddress())
 	if addr == "" {
 		return nil, status.Error(codes.InvalidArgument, "address is required")
@@ -126,22 +126,24 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		return nil, err
 	}
 
-	// Not found — return a clean response with found=false
 	if route == nil {
-		return &pb.RouteResponse{Found: false}, nil
+		return &pb.RouteLookupResponse{Found: false}, nil
 	}
 
-	return formatRouteResponse(route), nil
+	return &pb.RouteLookupResponse{
+		Found: true,
+		Route: formatRouteResponse(route, ""),
+	}, nil
 }
 
-func formatRouteResponse(r *routing_table.Route) *pb.RouteResponse {
+func formatRouteResponse(r *routing_table.Route, peerIP string) *pb.Route {
 	if r == nil {
-		return &pb.RouteResponse{Found: false}
+		return nil
 	}
-	return &pb.RouteResponse{
-		Found:            true,
+	return &pb.Route{
 		Prefix:           r.Prefix.String(),
-		AsPath:           formatRouteASPath(r.Attributes.AsPath),
+		PeerIp:           peerIP,
+		AsPath:           r.Attributes.AsPath,
 		LocalPref:        r.Attributes.LocalPref,
 		Communities:      formatRouteCommunities(r.Attributes.Communities),
 		LargeCommunities: formatRouteLargeCommunities(r.Attributes.LargeCommunities),
@@ -160,7 +162,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 	copy(peers, g.bgp.peers)
 	g.bgp.mutex.RUnlock()
 
-	var results []*pb.RouteResponse
+	var results []*pb.Route
 	for _, p := range peers {
 		route, err := g.performLookup(p.rib, addr)
 		if err != nil {
@@ -169,15 +171,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 		}
 
 		if route != nil {
-			results = append(results, &pb.RouteResponse{
-				Found:            true,
-				Prefix:           route.Prefix.String(),
-				AsPath:           formatRouteASPath(route.Attributes.AsPath),
-				LocalPref:        route.Attributes.LocalPref,
-				Communities:      formatRouteCommunities(route.Attributes.Communities),
-				LargeCommunities: formatRouteLargeCommunities(route.Attributes.LargeCommunities),
-				PeerIp:           p.ip,
-			})
+			results = append(results, formatRouteResponse(route, p.ip))
 		}
 	}
 
@@ -222,17 +216,6 @@ func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing
 	return rib.SearchIPv6(ip), nil
 }
 
-// formatRouteASPath renders an AS path slice as a space-separated string.
-func formatRouteASPath(asPath []uint32) string {
-	if len(asPath) == 0 {
-		return ""
-	}
-	parts := make([]string, len(asPath))
-	for i, asn := range asPath {
-		parts[i] = fmt.Sprintf("%d", asn)
-	}
-	return strings.Join(parts, " ")
-}
 
 // formatRouteCommunities renders standard BGP communities as structured messages.
 func formatRouteCommunities(communities []uint32) []*pb.Community {
@@ -265,9 +248,8 @@ func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []*pb.LargeC
 	return result
 }
 
-// GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
-// The origin ASN is the last ASN in the AS path. Bogon ASNs are rejected.
-func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.RoutesResponse, error) {
+// GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN (lightweight).
+func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.PrefixesResponse, error) {
 	asn := in.GetAsn()
 	if asn == 0 {
 		return nil, status.Error(codes.InvalidArgument, "ASN is required")
@@ -279,12 +261,38 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 
 	v4routes, v6routes := g.bgp.rib.PrefixesByOriginASN(asn)
 
-	results := make([]*pb.RouteResponse, 0, len(v4routes)+len(v6routes))
+	results := make([]*pb.Prefix, 0, len(v4routes)+len(v6routes))
 	for _, r := range v4routes {
-		results = append(results, formatRouteResponse(&r))
+		results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
 	}
 	for _, r := range v6routes {
-		results = append(results, formatRouteResponse(&r))
+		results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+	}
+
+	return &pb.PrefixesResponse{
+		Prefixes: results,
+	}, nil
+}
+
+// GetRoutesByOrigin returns all IPv4 and IPv6 routes originated by the given ASN (detailed).
+func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.RoutesResponse, error) {
+	asn := in.GetAsn()
+	if asn == 0 {
+		return nil, status.Error(codes.InvalidArgument, "ASN is required")
+	}
+
+	if !bogons.ValidPublicASN(asn) {
+		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
+	}
+
+	v4routes, v6routes := g.bgp.rib.PrefixesByOriginASN(asn)
+
+	results := make([]*pb.Route, 0, len(v4routes)+len(v6routes))
+	for _, r := range v4routes {
+		results = append(results, formatRouteResponse(&r, ""))
+	}
+	for _, r := range v6routes {
+		results = append(results, formatRouteResponse(&r, ""))
 	}
 
 	return &pb.RoutesResponse{
@@ -307,12 +315,12 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 
 	v4routes, v6routes := g.bgp.rib.PrefixesByAsPathRegex(re)
 
-	results := make([]*pb.RouteResponse, 0, len(v4routes)+len(v6routes))
+	results := make([]*pb.Route, 0, len(v4routes)+len(v6routes))
 	for _, r := range v4routes {
-		results = append(results, formatRouteResponse(&r))
+		results = append(results, formatRouteResponse(&r, ""))
 	}
 	for _, r := range v6routes {
-		results = append(results, formatRouteResponse(&r))
+		results = append(results, formatRouteResponse(&r, ""))
 	}
 
 	return &pb.RoutesResponse{

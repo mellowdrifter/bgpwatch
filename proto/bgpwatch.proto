@@ -36,22 +36,30 @@ message LargeCommunity {
   uint32 local_data2 = 3;
 }
 
-// RouteResponse contains the result of a route lookup.
-message RouteResponse {
-  // Whether a matching route was found.
+message Route {
+  string prefix = 1;
+  repeated uint32 as_path = 2;
+  uint32 local_pref = 3;
+  repeated Community communities = 4;
+  repeated LargeCommunity large_communities = 5;
+  string peer_ip = 6;
+}
+
+message RouteLookupResponse {
   bool found = 1;
+  Route route = 2;
+}
 
-  // The matched prefix in CIDR notation (e.g. "1.1.1.0/24").
-  // Empty when found is false.
-  string prefix = 2;
+message RoutesResponse {
+  repeated Route routes = 1;
+}
 
-  // BGP path attributes of the matched route.
-  // All fields are empty/zero when found is false.
-  string as_path = 3;
-  uint32 local_pref = 4;
-  repeated Community communities = 5;
-  repeated LargeCommunity large_communities = 6;
-  string peer_ip = 7;
+message Prefix {
+  string prefix = 1;
+}
+
+message PrefixesResponse {
+  repeated Prefix prefixes = 1;
 }
 
 message PeerStats {
@@ -72,9 +80,6 @@ message SystemStatsResponse {
   map<string, PeerStats> peer_stats = 8;
 }
 
-message RoutesResponse {
-  repeated RouteResponse routes = 1;
-}
 
 message AsPathRequest {
   string regex = 1;
@@ -96,13 +101,16 @@ service BGPWatch {
   rpc GetSystemStats(Empty) returns (SystemStatsResponse);
 
   // GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
-  rpc GetRoute(RouteRequest) returns (RouteResponse);
+  rpc GetRoute(RouteRequest) returns (RouteLookupResponse);
 
   // GetRoutes looks up a route across all peers.
   rpc GetRoutes(RouteRequest) returns (RoutesResponse);
 
-  // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
-  rpc GetPrefixesByOrigin(OriginRequest) returns (RoutesResponse);
+  // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN (lightweight).
+  rpc GetPrefixesByOrigin(OriginRequest) returns (PrefixesResponse);
+
+  // GetRoutesByOrigin returns all IPv4 and IPv6 routes originated by the given ASN (detailed).
+  rpc GetRoutesByOrigin(OriginRequest) returns (RoutesResponse);
 
   // GetPrefixesByAsPath returns all IPv4 and IPv6 prefixes matching the given AS path regex.
   rpc GetPrefixesByAsPath(AsPathRequest) returns (RoutesResponse);
