@@ -218,26 +218,33 @@ func formatRouteASPath(asPath []uint32) string {
 	return strings.Join(parts, " ")
 }
 
-// formatRouteCommunities renders standard BGP communities as "high:low" strings.
-func formatRouteCommunities(communities []uint32) []string {
+// formatRouteCommunities renders standard BGP communities as structured messages.
+func formatRouteCommunities(communities []uint32) []*pb.Community {
 	if len(communities) == 0 {
 		return nil
 	}
-	result := make([]string, len(communities))
+	result := make([]*pb.Community, len(communities))
 	for i, c := range communities {
-		result[i] = fmt.Sprintf("%d:%d", c>>16, c&0xFFFF)
+		result[i] = &pb.Community{
+			High: c >> 16,
+			Low:  c & 0xFFFF,
+		}
 	}
 	return result
 }
 
-// formatRouteLargeCommunities renders large communities as "admin:high:low" strings.
-func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []string {
+// formatRouteLargeCommunities renders large communities as structured messages.
+func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []*pb.LargeCommunity {
 	if len(lc) == 0 {
 		return nil
 	}
-	result := make([]string, len(lc))
+	result := make([]*pb.LargeCommunity, len(lc))
 	for i, c := range lc {
-		result[i] = fmt.Sprintf("%d:%d:%d", c.GlobalAdmin, c.LocalData1, c.LocalData2)
+		result[i] = &pb.LargeCommunity{
+			GlobalAdmin: c.GlobalAdmin,
+			LocalData1:  c.LocalData1,
+			LocalData2:  c.LocalData2,
+		}
 	}
 	return result
 }

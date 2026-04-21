@@ -23,6 +23,17 @@ message RouteRequest {
   string address = 1;
 }
 
+message Community {
+  uint32 high = 1;
+  uint32 low = 2;
+}
+
+message LargeCommunity {
+  uint32 global_admin = 1;
+  uint32 local_data1 = 2;
+  uint32 local_data2 = 3;
+}
+
 // RouteResponse contains the result of a route lookup.
 message RouteResponse {
   // Whether a matching route was found.
@@ -36,8 +47,8 @@ message RouteResponse {
   // All fields are empty/zero when found is false.
   string as_path = 3;
   uint32 local_pref = 4;
-  repeated string communities = 5;
-  repeated string large_communities = 6;
+  repeated Community communities = 5;
+  repeated LargeCommunity large_communities = 6;
   string peer_ip = 7;
 }
 
