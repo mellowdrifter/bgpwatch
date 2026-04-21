@@ -38,6 +38,7 @@ message RouteResponse {
   uint32 local_pref = 4;
   repeated string communities = 5;
   repeated string large_communities = 6;
+  string peer_ip = 7;
 }
 
 message PeerStats {
@@ -56,6 +57,10 @@ message SystemStatsResponse {
   uint32 num_gc = 6;
   uint64 global_rib_ram_bytes = 7;
   map<string, PeerStats> peer_stats = 8;
+}
+
+message RoutesResponse {
+  repeated RouteResponse routes = 1;
 }
 
 // OriginRequest specifies an ASN to query for originated prefixes.
@@ -81,6 +86,9 @@ service BGPWatch {
 
   // GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
   rpc GetRoute(RouteRequest) returns (RouteResponse);
+
+  // GetRoutes looks up a route across all peers.
+  rpc GetRoutes(RouteRequest) returns (RoutesResponse);
 
   // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
   rpc GetPrefixesByOrigin(OriginRequest) returns (OriginResponse);

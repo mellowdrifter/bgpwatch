@@ -112,44 +112,9 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		return nil, status.Error(codes.InvalidArgument, "address is required")
 	}
 
-	var route *routing_table.Route
-
-	if strings.Contains(addr, "/") {
-		// Exact prefix match mode
-		prefix, err := netip.ParsePrefix(addr)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid prefix %q: %v", addr, err)
-		}
-		prefix = prefix.Masked()
-
-		// Bogon check on the prefix address
-		ip := prefix.Addr()
-		if !bogons.IsPublicIP(ip.AsSlice()) {
-			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
-		}
-
-		if ip.Is4() {
-			route = g.bgp.rib.LookupIPv4(prefix)
-		} else {
-			route = g.bgp.rib.LookupIPv6(prefix)
-		}
-	} else {
-		// Longest prefix match mode
-		ip, err := netip.ParseAddr(addr)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
-		}
-
-		// Bogon check
-		if !bogons.IsPublicIP(ip.AsSlice()) {
-			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
-		}
-
-		if ip.Is4() {
-			route = g.bgp.rib.SearchIPv4(ip)
-		} else {
-			route = g.bgp.rib.SearchIPv6(ip)
-		}
+	route, err := g.performLookup(g.bgp.rib, addr)
+	if err != nil {
+		return nil, err
 	}
 
 	// Not found — return a clean response with found=false
@@ -165,6 +130,80 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		Communities:      formatRouteCommunities(route.Attributes.Communities),
 		LargeCommunities: formatRouteLargeCommunities(route.Attributes.LargeCommunities),
 	}, nil
+}
+
+// GetRoutes looks up a route across all peers.
+func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.RoutesResponse, error) {
+	addr := strings.TrimSpace(in.GetAddress())
+	if addr == "" {
+		return nil, status.Error(codes.InvalidArgument, "address is required")
+	}
+
+	g.bgp.mutex.RLock()
+	peers := make([]*peer, len(g.bgp.peers))
+	copy(peers, g.bgp.peers)
+	g.bgp.mutex.RUnlock()
+
+	var results []*pb.RouteResponse
+	for _, p := range peers {
+		route, err := g.performLookup(p.rib, addr)
+		if err != nil {
+			// Skip peers that cause parsing errors or bogon hits (though should be consistent)
+			continue
+		}
+
+		if route != nil {
+			results = append(results, &pb.RouteResponse{
+				Found:            true,
+				Prefix:           route.Prefix.String(),
+				AsPath:           formatRouteASPath(route.Attributes.AsPath),
+				LocalPref:        route.Attributes.LocalPref,
+				Communities:      formatRouteCommunities(route.Attributes.Communities),
+				LargeCommunities: formatRouteLargeCommunities(route.Attributes.LargeCommunities),
+				PeerIp:           p.ip,
+			})
+		}
+	}
+
+	return &pb.RoutesResponse{Routes: results}, nil
+}
+
+func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing_table.Route, error) {
+	if strings.Contains(addr, "/") {
+		// Exact prefix match mode
+		prefix, err := netip.ParsePrefix(addr)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid prefix %q: %v", addr, err)
+		}
+		prefix = prefix.Masked()
+
+		// Bogon check on the prefix address
+		ip := prefix.Addr()
+		if !bogons.IsPublicIP(ip.AsSlice()) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
+		}
+
+		if ip.Is4() {
+			return rib.LookupIPv4(prefix), nil
+		}
+		return rib.LookupIPv6(prefix), nil
+	}
+
+	// Longest prefix match mode
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
+	}
+
+	// Bogon check
+	if !bogons.IsPublicIP(ip.AsSlice()) {
+		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
+	}
+
+	if ip.Is4() {
+		return rib.SearchIPv4(ip), nil
+	}
+	return rib.SearchIPv6(ip), nil
 }
 
 // formatRouteASPath renders an AS path slice as a space-separated string.
