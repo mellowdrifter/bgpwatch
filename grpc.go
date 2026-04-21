@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -31,9 +32,17 @@ func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsRes
 	v4 := g.bgp.rib.V4Count()
 	v6 := g.bgp.rib.V6Count()
 
+	var totalV4Paths, totalV6Paths int64
+	for _, p := range g.bgp.peers {
+		totalV4Paths += int64(p.rib.V4Count())
+		totalV6Paths += int64(p.rib.V6Count())
+	}
+
 	return &pb.TotalsResponse{
-		Ipv4Count: int32(v4),
-		Ipv6Count: int32(v6),
+		Ipv4Count:      int32(v4),
+		Ipv6Count:      int32(v6),
+		TotalIpv4Paths: totalV4Paths,
+		TotalIpv6Paths: totalV6Paths,
 	}, nil
 }
 
@@ -122,14 +131,21 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		return &pb.RouteResponse{Found: false}, nil
 	}
 
+	return formatRouteResponse(route), nil
+}
+
+func formatRouteResponse(r *routing_table.Route) *pb.RouteResponse {
+	if r == nil {
+		return &pb.RouteResponse{Found: false}
+	}
 	return &pb.RouteResponse{
 		Found:            true,
-		Prefix:           route.Prefix.String(),
-		AsPath:           formatRouteASPath(route.Attributes.AsPath),
-		LocalPref:        route.Attributes.LocalPref,
-		Communities:      formatRouteCommunities(route.Attributes.Communities),
-		LargeCommunities: formatRouteLargeCommunities(route.Attributes.LargeCommunities),
-	}, nil
+		Prefix:           r.Prefix.String(),
+		AsPath:           formatRouteASPath(r.Attributes.AsPath),
+		LocalPref:        r.Attributes.LocalPref,
+		Communities:      formatRouteCommunities(r.Attributes.Communities),
+		LargeCommunities: formatRouteLargeCommunities(r.Attributes.LargeCommunities),
+	}
 }
 
 // GetRoutes looks up a route across all peers.
@@ -251,7 +267,7 @@ func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []*pb.LargeC
 
 // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
 // The origin ASN is the last ASN in the AS path. Bogon ASNs are rejected.
-func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.OriginResponse, error) {
+func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.RoutesResponse, error) {
 	asn := in.GetAsn()
 	if asn == 0 {
 		return nil, status.Error(codes.InvalidArgument, "ASN is required")
@@ -261,22 +277,53 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
 	}
 
-	v4prefixes, v6prefixes := g.bgp.rib.PrefixesByOriginASN(asn)
+	v4routes, v6routes := g.bgp.rib.PrefixesByOriginASN(asn)
 
-	v4strs := make([]string, len(v4prefixes))
-	for i, p := range v4prefixes {
-		v4strs[i] = p.String()
+	results := make([]*pb.RouteResponse, 0, len(v4routes)+len(v6routes))
+	for _, r := range v4routes {
+		results = append(results, formatRouteResponse(&r))
+	}
+	for _, r := range v6routes {
+		results = append(results, formatRouteResponse(&r))
 	}
 
-	v6strs := make([]string, len(v6prefixes))
-	for i, p := range v6prefixes {
-		v6strs[i] = p.String()
-	}
-
-	return &pb.OriginResponse{
-		Ipv4Prefixes: v4strs,
-		Ipv6Prefixes: v6strs,
+	return &pb.RoutesResponse{
+		Routes: results,
 	}, nil
+}
+
+// GetPrefixesByAsPath returns all IPv4 and IPv6 prefixes matching the given AS path regex.
+func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathRequest) (*pb.RoutesResponse, error) {
+	regexStr := in.GetRegex()
+	if regexStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "regex is required")
+	}
+
+	goRegex := ciscoRegexpToGo(regexStr)
+	re, err := regexp.Compile(goRegex)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid regex %q: %v", regexStr, err)
+	}
+
+	v4routes, v6routes := g.bgp.rib.PrefixesByAsPathRegex(re)
+
+	results := make([]*pb.RouteResponse, 0, len(v4routes)+len(v6routes))
+	for _, r := range v4routes {
+		results = append(results, formatRouteResponse(&r))
+	}
+	for _, r := range v6routes {
+		results = append(results, formatRouteResponse(&r))
+	}
+
+	return &pb.RoutesResponse{
+		Routes: results,
+	}, nil
+}
+
+func ciscoRegexpToGo(cisco string) string {
+	// Cisco _ matches delimiters (start, end, space, comma, etc.)
+	// Our AS path is space-separated.
+	return strings.ReplaceAll(cisco, "_", "(?:^| +|$)")
 }
 
 func (s *bgpWatchServer) startGRPC(port int) {

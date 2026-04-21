@@ -9,6 +9,8 @@ message Empty {}
 message TotalsResponse {
   int32 ipv4_count = 1;
   int32 ipv6_count = 2;
+  int64 total_ipv4_paths = 3;
+  int64 total_ipv6_paths = 4;
 }
 
 message MasksResponse {
@@ -74,15 +76,13 @@ message RoutesResponse {
   repeated RouteResponse routes = 1;
 }
 
+message AsPathRequest {
+  string regex = 1;
+}
+
 // OriginRequest specifies an ASN to query for originated prefixes.
 message OriginRequest {
   uint32 asn = 1;
-}
-
-// OriginResponse contains all prefixes originated by the requested ASN.
-message OriginResponse {
-  repeated string ipv4_prefixes = 1;
-  repeated string ipv6_prefixes = 2;
 }
 
 service BGPWatch {
@@ -102,5 +102,8 @@ service BGPWatch {
   rpc GetRoutes(RouteRequest) returns (RoutesResponse);
 
   // GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN.
-  rpc GetPrefixesByOrigin(OriginRequest) returns (OriginResponse);
+  rpc GetPrefixesByOrigin(OriginRequest) returns (RoutesResponse);
+
+  // GetPrefixesByAsPath returns all IPv4 and IPv6 prefixes matching the given AS path regex.
+  rpc GetPrefixesByAsPath(AsPathRequest) returns (RoutesResponse);
 }
