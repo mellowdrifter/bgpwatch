@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"encoding/json"
+	"net/http"
 
 	"github.com/mellowdrifter/bogons"
 	"github.com/mellowdrifter/routing_table"
@@ -68,18 +70,22 @@ func (g *grpcServer) GetMasks(ctx context.Context, in *pb.Empty) (*pb.MasksRespo
 }
 
 func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.SystemStatsResponse, error) {
-	g.bgp.mutex.RLock()
-	defer g.bgp.mutex.RUnlock()
+	return g.bgp.collectStats(), nil
+}
+
+func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	globalMem := g.bgp.rib.MemoryUsage()
+	globalMem := s.rib.MemoryUsage()
 	globalRam := globalMem.RoutingTablesEffective + globalMem.RoutingTablesOverhead +
 		globalMem.RouteAttributesEffective + globalMem.RouteAttributesOverhead
 
 	peerStats := make(map[string]*pb.PeerStats)
-	for _, p := range g.bgp.peers {
+	for _, p := range s.peers {
 		p.mutex.RLock()
 		pmem := p.rib.MemoryUsage()
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
@@ -108,7 +114,7 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 		NumGc:             m.NumGC,
 		GlobalRibRamBytes: globalRam,
 		PeerStats:         peerStats,
-	}, nil
+	}
 }
 
 // GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
@@ -343,6 +349,20 @@ func (s *bgpWatchServer) startGRPC(port int) {
 	srv := grpc.NewServer()
 	pb.RegisterBGPWatchServer(srv, &grpcServer{bgp: s})
 	reflection.Register(srv)
+
+	// Add HTTP wrapper for system stats
+	go func() {
+		http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+			stats := s.collectStats()
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			json.NewEncoder(w).Encode(stats)
+		})
+		log.Printf("HTTP stats server listening on port 1180\n")
+		if err := http.ListenAndServe(":1180", nil); err != nil {
+			log.Printf("HTTP server failed: %v\n", err)
+		}
+	}()
 
 	log.Printf("gRPC server listening on port %d\n", port)
 	if err := srv.Serve(lis); err != nil {
