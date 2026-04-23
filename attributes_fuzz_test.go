@@ -21,7 +21,7 @@ func FuzzDecodeIPv4Withdraws(f *testing.F) {
 	f.Add([]byte{32, 8, 8, 8, 8})
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = decodeIPv4Withdraws(data)
+		_, _ = decodeIPv4Withdraws(data, nil)
 	})
 }
 
@@ -59,6 +59,6 @@ func FuzzDecodeMPUnreachNLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := bytes.NewBuffer(data)
-		_, _, _ = decodeMPUnreachNLRI(buf, int64(len(data)))
+		_, _, _ = decodeMPUnreachNLRI(buf, int64(len(data)), nil)
 	})
 }

@@ -190,7 +190,7 @@ func decodePathAttributes(attr []byte, ap []addr, ignoreComms bool) (*pathAttr, 
 		case tcMPReachNLRI:
 			pa.ipv6NLRI, pa.nextHopsv6, err = decodeMPReachNLRI(buf, ap)
 		case tcMPUnreachNLRI:
-			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len)
+			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len, ap)
 		case tcCommunity:
 			if ignoreComms {
 				_, err = io.CopyN(io.Discard, buf, len)
@@ -613,7 +613,7 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 }
 
 // Decodes IPv6 withdrawals (MP_UNREACH_NLRI)
-func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) (bool, []v6Addr, error) {
+func decodeMPUnreachNLRI(b *bytes.Buffer, len int64, ap []addr) (bool, []v6Addr, error) {
 	if len == 3 {
 		// Just AFI (2 bytes) and SAFI (1 byte), no NLRI => End of RIB
 		b.Next(3)
@@ -624,17 +624,24 @@ func decodeMPUnreachNLRI(b *bytes.Buffer, len int64) (bool, []v6Addr, error) {
 	b.Next(3)
 
 	// Decode the rest as withdrawn prefixes
-	nlri, err := decodeIPv6NLRI(b, nil)
+	nlri, err := decodeIPv6NLRI(b, ap)
 	return false, nlri, err
 }
 
-func decodeIPv4Withdraws(wd []byte) (*prefixAttributes, error) {
+func decodeIPv4Withdraws(wd []byte, ap []addr) (*prefixAttributes, error) {
 	r := bytes.NewReader(wd)
 	var pa prefixAttributes
 	var addrs []v4Addr
 	for {
 		if r.Len() == 0 {
 			break
+		}
+
+		var id uint32
+		if len(ap) != 0 {
+			if err := binary.Read(r, binary.BigEndian, &id); err != nil {
+				return nil, err
+			}
 		}
 
 		var mask uint8
@@ -650,6 +657,7 @@ func decodeIPv4Withdraws(wd []byte) (*prefixAttributes, error) {
 		addrs = append(addrs, v4Addr{
 			Mask:   mask,
 			Prefix: prefix,
+			ID:     id,
 		})
 	}
 	pa.v4Withdraws = addrs

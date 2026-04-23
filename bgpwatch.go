@@ -218,7 +218,7 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
 		rib:       routing_table.GetNewRib(),
-		prefixSet: make(map[netip.Prefix]struct{}),
+		prefixSet: make(map[netip.Prefix]map[uint32]struct{}),
 	}
 
 	s.peers = append(s.peers, peer)
@@ -246,16 +246,16 @@ func (s *bgpWatchServer) remove(p *peer) {
 	p.conn.Close()
 
 	// Batch delete unique prefixes from the global RIB
-	var v4Del []netip.Prefix
-	var v6Del []netip.Prefix
+	var v4Del []routing_table.PrefixWithID
+	var v6Del []routing_table.PrefixWithID
 
 	p.mutex.RLock()
 	for prefix := range p.prefixSet {
 		if !s.isHeldByOtherPeerLocked(prefix, p) {
 			if prefix.Addr().Is4() {
-				v4Del = append(v4Del, prefix)
+				v4Del = append(v4Del, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
 			} else {
-				v6Del = append(v6Del, prefix)
+				v6Del = append(v6Del, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
 			}
 		}
 	}

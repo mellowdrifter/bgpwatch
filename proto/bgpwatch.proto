@@ -43,6 +43,7 @@ message Route {
   repeated Community communities = 4;
   repeated LargeCommunity large_communities = 5;
   string peer_ip = 6;
+  uint32 path_id = 7;
 }
 
 message RouteLookupResponse {

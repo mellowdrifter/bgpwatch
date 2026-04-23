@@ -45,7 +45,7 @@ type peer struct {
 	out           *bytes.Buffer
 	prefixes      *prefixAttributes
 	rib           routing_table.Rib
-	prefixSet     map[netip.Prefix]struct{}
+	prefixSet     map[netip.Prefix]map[uint32]struct{}
 }
 
 func (p *peer) peerWorker() {
@@ -244,7 +244,7 @@ func (p *peer) handleUpdate() error {
 		if _, err := io.ReadFull(p.in, wbuf); err != nil {
 			return err
 		}
-		wd, err := decodeIPv4Withdraws(wbuf)
+		wd, err := decodeIPv4Withdraws(wbuf, p.param.AddPath)
 		if err != nil {
 			return err
 		}
@@ -493,22 +493,27 @@ func (p *peer) processRibUpdates() {
 
 	// Process withdrawals
 	if len(prefixes.v4Withdraws) > 0 {
-		var v4w []netip.Prefix
-		var v4DelGlobal []netip.Prefix
+		var v4w []routing_table.PrefixWithID
+		var v4DelGlobal []routing_table.PrefixWithID
 		for _, w := range prefixes.v4Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
 				prefix := netip.PrefixFrom(ip, int(w.Mask))
-				v4w = append(v4w, prefix)
-				
-				p.mutex.Lock()
-				delete(p.prefixSet, prefix)
-				p.mutex.Unlock()
+				v4w = append(v4w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 
-				p.server.mutex.RLock()
-				if !p.server.isHeldByOtherPeerLocked(prefix, p) {
-					v4DelGlobal = append(v4DelGlobal, prefix)
+				p.mutex.Lock()
+				if paths, ok := p.prefixSet[prefix]; ok {
+					delete(paths, w.ID)
+					if len(paths) == 0 {
+						delete(p.prefixSet, prefix)
+
+						p.server.mutex.RLock()
+						if !p.server.isHeldByOtherPeerLocked(prefix, p) {
+							v4DelGlobal = append(v4DelGlobal, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
+						}
+						p.server.mutex.RUnlock()
+					}
 				}
-				p.server.mutex.RUnlock()
+				p.mutex.Unlock()
 			}
 		}
 		p.rib.DeleteIPv4Batch(v4w)
@@ -518,22 +523,27 @@ func (p *peer) processRibUpdates() {
 	}
 
 	if len(prefixes.v6Withdraws) > 0 {
-		var v6w []netip.Prefix
-		var v6DelGlobal []netip.Prefix
+		var v6w []routing_table.PrefixWithID
+		var v6DelGlobal []routing_table.PrefixWithID
 		for _, w := range prefixes.v6Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
 				prefix := netip.PrefixFrom(ip, int(w.Mask))
-				v6w = append(v6w, prefix)
+				v6w = append(v6w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 
 				p.mutex.Lock()
-				delete(p.prefixSet, prefix)
-				p.mutex.Unlock()
+				if paths, ok := p.prefixSet[prefix]; ok {
+					delete(paths, w.ID)
+					if len(paths) == 0 {
+						delete(p.prefixSet, prefix)
 
-				p.server.mutex.RLock()
-				if !p.server.isHeldByOtherPeerLocked(prefix, p) {
-					v6DelGlobal = append(v6DelGlobal, prefix)
+						p.server.mutex.RLock()
+						if !p.server.isHeldByOtherPeerLocked(prefix, p) {
+							v6DelGlobal = append(v6DelGlobal, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
+						}
+						p.server.mutex.RUnlock()
+					}
 				}
-				p.server.mutex.RUnlock()
+				p.mutex.Unlock()
 			}
 		}
 		p.rib.DeleteIPv6Batch(v6w)
@@ -551,19 +561,26 @@ func (p *peer) processRibUpdates() {
 			for _, pfx := range prefixes.v4prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
 					prefix := netip.PrefixFrom(ip, int(pfx.Mask))
-					route := routing_table.Route{
+					v4a = append(v4a, routing_table.Route{
 						Prefix:     prefix,
 						Attributes: ra,
-					}
-					v4a = append(v4a, route)
-
+						PathID:     pfx.ID,
+					})
 					p.mutex.Lock()
-					p.prefixSet[prefix] = struct{}{}
+					if p.prefixSet[prefix] == nil {
+						p.prefixSet[prefix] = make(map[uint32]struct{})
+					}
+					p.prefixSet[prefix][pfx.ID] = struct{}{}
 					p.mutex.Unlock()
+
+					p.server.rib.InsertIPv4(routing_table.Route{
+						Prefix:     prefix,
+						Attributes: ra,
+						PathID:     0, // Global RIB uses PathID 0
+					})
 				}
 			}
 			p.rib.InsertIPv4Batch(v4a)
-			p.server.rib.InsertIPv4Batch(v4a)
 		}
 
 		if len(prefixes.v6prefixes) > 0 {
@@ -571,19 +588,26 @@ func (p *peer) processRibUpdates() {
 			for _, pfx := range prefixes.v6prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
 					prefix := netip.PrefixFrom(ip, int(pfx.Mask))
-					route := routing_table.Route{
+					v6a = append(v6a, routing_table.Route{
 						Prefix:     prefix,
 						Attributes: ra,
-					}
-					v6a = append(v6a, route)
-
+						PathID:     pfx.ID,
+					})
 					p.mutex.Lock()
-					p.prefixSet[prefix] = struct{}{}
+					if p.prefixSet[prefix] == nil {
+						p.prefixSet[prefix] = make(map[uint32]struct{})
+					}
+					p.prefixSet[prefix][pfx.ID] = struct{}{}
 					p.mutex.Unlock()
+
+					p.server.rib.InsertIPv6(routing_table.Route{
+						Prefix:     prefix,
+						Attributes: ra,
+						PathID:     0, // Global RIB uses PathID 0
+					})
 				}
 			}
 			p.rib.InsertIPv6Batch(v6a)
-			p.server.rib.InsertIPv6Batch(v6a)
 		}
 	}
 

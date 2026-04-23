@@ -153,6 +153,7 @@ func formatRouteResponse(r *routing_table.Route, peerIP string) *pb.Route {
 		LocalPref:        r.Attributes.LocalPref,
 		Communities:      formatRouteCommunities(r.Attributes.Communities),
 		LargeCommunities: formatRouteLargeCommunities(r.Attributes.LargeCommunities),
+		PathId:           r.PathID,
 	}
 }
 
@@ -170,14 +171,13 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 
 	var results []*pb.Route
 	for _, p := range peers {
-		route, err := g.performLookup(p.rib, addr)
+		routes, err := g.performMultiLookup(p.rib, addr)
 		if err != nil {
-			// Skip peers that cause parsing errors or bogon hits (though should be consistent)
 			continue
 		}
 
-		if route != nil {
-			results = append(results, formatRouteResponse(route, p.ip))
+		for _, r := range routes {
+			results = append(results, formatRouteResponse(&r, p.ip))
 		}
 	}
 
@@ -186,14 +186,12 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 
 func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing_table.Route, error) {
 	if strings.Contains(addr, "/") {
-		// Exact prefix match mode
 		prefix, err := netip.ParsePrefix(addr)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid prefix %q: %v", addr, err)
 		}
 		prefix = prefix.Masked()
 
-		// Bogon check on the prefix address
 		ip := prefix.Addr()
 		if !bogons.IsPublicIP(ip.AsSlice()) {
 			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
@@ -205,13 +203,11 @@ func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing
 		return rib.LookupIPv6(prefix), nil
 	}
 
-	// Longest prefix match mode
 	ip, err := netip.ParseAddr(addr)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
 	}
 
-	// Bogon check
 	if !bogons.IsPublicIP(ip.AsSlice()) {
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
@@ -220,6 +216,47 @@ func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing
 		return rib.SearchIPv4(ip), nil
 	}
 	return rib.SearchIPv6(ip), nil
+}
+
+func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]routing_table.Route, error) {
+	if strings.Contains(addr, "/") {
+		prefix, err := netip.ParsePrefix(addr)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid prefix %q: %v", addr, err)
+		}
+		prefix = prefix.Masked()
+
+		ip := prefix.Addr()
+		if !bogons.IsPublicIP(ip.AsSlice()) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
+		}
+
+		if ip.Is4() {
+			return rib.AllPathsIPv4(prefix), nil
+		}
+		return rib.AllPathsIPv6(prefix), nil
+	}
+
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
+	}
+
+	if !bogons.IsPublicIP(ip.AsSlice()) {
+		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
+	}
+
+	var r *routing_table.Route
+	if ip.Is4() {
+		r = rib.SearchIPv4(ip)
+	} else {
+		r = rib.SearchIPv6(ip)
+	}
+
+	if r == nil {
+		return nil, nil
+	}
+	return []routing_table.Route{*r}, nil
 }
 
 
