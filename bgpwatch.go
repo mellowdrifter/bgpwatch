@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/netip"
 	"os"
 
 	"github.com/mellowdrifter/routing_table"
@@ -27,7 +26,6 @@ type bgpWatchServer struct {
 	listener net.Listener
 	peers    []*peer
 	mutex    sync.RWMutex
-	rib      routing_table.Rib
 	conf     config
 }
 
@@ -78,7 +76,6 @@ func main() {
 	// Start server
 	serv := bgpWatchServer{
 		mutex: sync.RWMutex{},
-		rib:   routing_table.GetNewRib(),
 		conf:  conf,
 	}
 	serv.listen(conf)
@@ -218,7 +215,6 @@ func (s *bgpWatchServer) accept(conn net.Conn, c config) *peer {
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
 		rib:       routing_table.GetNewRib(),
-		prefixSet: make(map[netip.Prefix]map[uint32]struct{}),
 	}
 
 	s.peers = append(s.peers, peer)
@@ -245,49 +241,9 @@ func (s *bgpWatchServer) remove(p *peer) {
 	// Don't worry about errors as it's mostly because it's already closed.
 	p.conn.Close()
 
-	// Batch delete unique prefixes from the global RIB
-	var v4Del []routing_table.PrefixWithID
-	var v6Del []routing_table.PrefixWithID
-
-	p.mutex.RLock()
-	for prefix := range p.prefixSet {
-		if !s.isHeldByOtherPeerLocked(prefix, p) {
-			if prefix.Addr().Is4() {
-				v4Del = append(v4Del, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
-			} else {
-				v6Del = append(v6Del, routing_table.PrefixWithID{Prefix: prefix, PathID: 0})
-			}
-		}
-	}
-	p.mutex.RUnlock()
-
-	if len(v4Del) > 0 {
-		s.rib.DeleteIPv4Batch(v4Del)
-	}
-	if len(v6Del) > 0 {
-		s.rib.DeleteIPv6Batch(v6Del)
-	}
-
 	// Clean up peer's memory
 	p.mutex.Lock()
-	p.prefixSet = nil
 	p.rib = routing_table.Rib{}
 	p.mutex.Unlock()
 }
 
-// isHeldByOtherPeerLocked checks if any peer other than the excluded one holds the prefix.
-// MUST be called with s.mutex held (at least RLock).
-func (s *bgpWatchServer) isHeldByOtherPeerLocked(prefix netip.Prefix, exclude *peer) bool {
-	for _, p := range s.peers {
-		if p == exclude {
-			continue
-		}
-		p.mutex.RLock()
-		_, exists := p.prefixSet[prefix]
-		p.mutex.RUnlock()
-		if exists {
-			return true
-		}
-	}
-	return false
-}

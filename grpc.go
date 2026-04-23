@@ -28,45 +28,70 @@ type grpcServer struct {
 }
 
 func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsResponse, error) {
-	g.bgp.mutex.RLock()
-	defer g.bgp.mutex.RUnlock()
+	peers := g.snapshotPeers()
 
-	v4 := g.bgp.rib.V4Count()
-	v6 := g.bgp.rib.V6Count()
-
+	seenV4 := make(map[netip.Prefix]struct{})
+	seenV6 := make(map[netip.Prefix]struct{})
 	var totalV4Paths, totalV6Paths int64
-	for _, p := range g.bgp.peers {
+
+	for _, p := range peers {
+		p.mutex.RLock()
 		totalV4Paths += int64(p.rib.V4Count())
 		totalV6Paths += int64(p.rib.V6Count())
+		for _, pfx := range p.rib.AllPrefixesIPv4() {
+			seenV4[pfx] = struct{}{}
+		}
+		for _, pfx := range p.rib.AllPrefixesIPv6() {
+			seenV6[pfx] = struct{}{}
+		}
+		p.mutex.RUnlock()
 	}
 
 	return &pb.TotalsResponse{
-		Ipv4Count:      int32(v4),
-		Ipv6Count:      int32(v6),
+		Ipv4Count:      int32(len(seenV4)),
+		Ipv6Count:      int32(len(seenV6)),
 		TotalIpv4Paths: totalV4Paths,
 		TotalIpv6Paths: totalV6Paths,
 	}, nil
 }
 
 func (g *grpcServer) GetMasks(ctx context.Context, in *pb.Empty) (*pb.MasksResponse, error) {
-	g.bgp.mutex.RLock()
-	defer g.bgp.mutex.RUnlock()
+	peers := g.snapshotPeers()
 
 	v4masks := make(map[int32]int32)
 	v6masks := make(map[int32]int32)
+	seenV4 := make(map[netip.Prefix]struct{})
+	seenV6 := make(map[netip.Prefix]struct{})
 
-	pv4, pv6 := g.bgp.rib.GetSubnets()
-	for k, v := range pv4 {
-		v4masks[int32(k)] += int32(v)
-	}
-	for k, v := range pv6 {
-		v6masks[int32(k)] += int32(v)
+	for _, p := range peers {
+		p.mutex.RLock()
+		for _, pfx := range p.rib.AllPrefixesIPv4() {
+			if _, ok := seenV4[pfx]; !ok {
+				seenV4[pfx] = struct{}{}
+				v4masks[int32(pfx.Bits())]++
+			}
+		}
+		for _, pfx := range p.rib.AllPrefixesIPv6() {
+			if _, ok := seenV6[pfx]; !ok {
+				seenV6[pfx] = struct{}{}
+				v6masks[int32(pfx.Bits())]++
+			}
+		}
+		p.mutex.RUnlock()
 	}
 
 	return &pb.MasksResponse{
 		Ipv4Masks: v4masks,
 		Ipv6Masks: v6masks,
 	}, nil
+}
+
+func (g *grpcServer) snapshotPeers() []*peer {
+	g.bgp.mutex.RLock()
+	defer g.bgp.mutex.RUnlock()
+	out := make([]*peer, len(g.bgp.peers))
+	copy(out, g.bgp.peers)
+	return out
 }
 
 func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.SystemStatsResponse, error) {
@@ -80,16 +105,14 @@ func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	globalMem := s.rib.MemoryUsage()
-	globalRam := globalMem.RoutingTablesEffective + globalMem.RoutingTablesOverhead +
-		globalMem.RouteAttributesEffective + globalMem.RouteAttributesOverhead
-
+	var totalPeerRam uint64
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range s.peers {
 		p.mutex.RLock()
 		pmem := p.rib.MemoryUsage()
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
 			pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
+		totalPeerRam += peerRam
 
 		var duration uint64
 		if !p.establishedTime.IsZero() {
@@ -112,7 +135,7 @@ func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
 		HeapIdleBytes:     m.HeapIdle,
 		HeapReleasedBytes: m.HeapReleased,
 		NumGc:             m.NumGC,
-		GlobalRibRamBytes: globalRam,
+		TotalPeerRibRamBytes: totalPeerRam,
 		PeerStats:         peerStats,
 	}
 }
@@ -127,18 +150,51 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		return nil, status.Error(codes.InvalidArgument, "address is required")
 	}
 
-	route, err := g.performLookup(g.bgp.rib, addr)
-	if err != nil {
-		return nil, err
+	peers := g.snapshotPeers()
+	var candidates []routing_table.Route
+	var peerIPs []string
+
+	for _, p := range peers {
+		r, err := g.performLookup(p.rib, addr)
+		if err != nil {
+			continue
+		}
+		if r != nil {
+			candidates = append(candidates, *r)
+			peerIPs = append(peerIPs, p.ip)
+		}
 	}
 
-	if route == nil {
+	if len(candidates) == 0 {
 		return &pb.RouteLookupResponse{Found: false}, nil
+	}
+
+	// Pick best candidate
+	bestIdx := 0
+	for i := 1; i < len(candidates); i++ {
+		curr := candidates[i]
+		best := candidates[bestIdx]
+
+		better := false
+		if curr.Attributes.LocalPref > best.Attributes.LocalPref {
+			better = true
+		} else if curr.Attributes.LocalPref == best.Attributes.LocalPref {
+			if len(curr.Attributes.AsPath) < len(best.Attributes.AsPath) {
+				better = true
+			} else if len(curr.Attributes.AsPath) == len(best.Attributes.AsPath) {
+				if curr.PathID < best.PathID {
+					better = true
+				}
+			}
+		}
+		if better {
+			bestIdx = i
+		}
 	}
 
 	return &pb.RouteLookupResponse{
 		Found: true,
-		Route: formatRouteResponse(route, ""),
+		Route: formatRouteResponse(&candidates[bestIdx], peerIPs[bestIdx]),
 	}, nil
 }
 
@@ -302,14 +358,26 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
 	}
 
-	v4routes, v6routes := g.bgp.rib.PrefixesByOriginASN(asn)
+	peers := g.snapshotPeers()
+	seen := make(map[netip.Prefix]struct{})
+	var results []*pb.Prefix
 
-	results := make([]*pb.Prefix, 0, len(v4routes)+len(v6routes))
-	for _, r := range v4routes {
-		results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
-	}
-	for _, r := range v6routes {
-		results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+	for _, p := range peers {
+		p.mutex.RLock()
+		v4, v6 := p.rib.PrefixesByOriginASN(asn)
+		for _, r := range v4 {
+			if _, ok := seen[r.Prefix]; !ok {
+				seen[r.Prefix] = struct{}{}
+				results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+			}
+		}
+		for _, r := range v6 {
+			if _, ok := seen[r.Prefix]; !ok {
+				seen[r.Prefix] = struct{}{}
+				results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+			}
+		}
+		p.mutex.RUnlock()
 	}
 
 	return &pb.PrefixesResponse{
@@ -328,14 +396,29 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
 	}
 
-	v4routes, v6routes := g.bgp.rib.PrefixesByOriginASN(asn)
-
-	results := make([]*pb.Route, 0, len(v4routes)+len(v6routes))
-	for _, r := range v4routes {
-		results = append(results, formatRouteResponse(&r, ""))
+	peers := g.snapshotPeers()
+	type candidate struct {
+		route  routing_table.Route
+		peerIP string
 	}
-	for _, r := range v6routes {
-		results = append(results, formatRouteResponse(&r, ""))
+	prefixToBest := make(map[netip.Prefix]candidate)
+
+	for _, p := range peers {
+		p.mutex.RLock()
+		v4, v6 := p.rib.PrefixesByOriginASN(asn)
+		all := append(v4, v6...)
+		for _, r := range all {
+			existing, ok := prefixToBest[r.Prefix]
+			if !ok || g.isBetter(r, existing.route) {
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: p.ip}
+			}
+		}
+		p.mutex.RUnlock()
+	}
+
+	results := make([]*pb.Route, 0, len(prefixToBest))
+	for _, c := range prefixToBest {
+		results = append(results, formatRouteResponse(&c.route, c.peerIP))
 	}
 
 	return &pb.RoutesResponse{
@@ -356,19 +439,50 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 		return nil, status.Errorf(codes.InvalidArgument, "invalid regex %q: %v", regexStr, err)
 	}
 
-	v4routes, v6routes := g.bgp.rib.PrefixesByAsPathRegex(re)
-
-	results := make([]*pb.Route, 0, len(v4routes)+len(v6routes))
-	for _, r := range v4routes {
-		results = append(results, formatRouteResponse(&r, ""))
+	peers := g.snapshotPeers()
+	type candidate struct {
+		route  routing_table.Route
+		peerIP string
 	}
-	for _, r := range v6routes {
-		results = append(results, formatRouteResponse(&r, ""))
+	prefixToBest := make(map[netip.Prefix]candidate)
+
+	for _, p := range peers {
+		p.mutex.RLock()
+		v4, v6 := p.rib.PrefixesByAsPathRegex(re)
+		all := append(v4, v6...)
+		for _, r := range all {
+			existing, ok := prefixToBest[r.Prefix]
+			if !ok || g.isBetter(r, existing.route) {
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: p.ip}
+			}
+		}
+		p.mutex.RUnlock()
+	}
+
+	results := make([]*pb.Route, 0, len(prefixToBest))
+	for _, c := range prefixToBest {
+		results = append(results, formatRouteResponse(&c.route, c.peerIP))
 	}
 
 	return &pb.RoutesResponse{
 		Routes: results,
 	}, nil
+}
+
+func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
+	if curr.Attributes.LocalPref > best.Attributes.LocalPref {
+		return true
+	}
+	if curr.Attributes.LocalPref < best.Attributes.LocalPref {
+		return false
+	}
+	if len(curr.Attributes.AsPath) < len(best.Attributes.AsPath) {
+		return true
+	}
+	if len(curr.Attributes.AsPath) > len(best.Attributes.AsPath) {
+		return false
+	}
+	return curr.PathID < best.PathID
 }
 
 func ciscoRegexpToGo(cisco string) string {
