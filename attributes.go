@@ -122,7 +122,7 @@ type prefixAttributes struct {
 }
 
 // AddPath is just shoved in here. Fix this
-func decodePathAttributes(attr []byte, ap []addr, ignoreComms bool) (*pathAttr, error) {
+func decodePathAttributes(attr []byte, v6AddPath bool, ignoreComms bool) (*pathAttr, error) {
 	r := bytes.NewReader(attr)
 
 	var pa pathAttr
@@ -188,9 +188,9 @@ func decodePathAttributes(attr []byte, ap []addr, ignoreComms bool) (*pathAttr, 
 		case tcAggregator:
 			pa.agAS, pa.agOrigin, err = decodeAggregator(buf)
 		case tcMPReachNLRI:
-			pa.ipv6NLRI, pa.nextHopsv6, err = decodeMPReachNLRI(buf, ap)
+			pa.ipv6NLRI, pa.nextHopsv6, err = decodeMPReachNLRI(buf, v6AddPath)
 		case tcMPUnreachNLRI:
-			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len, ap)
+			pa.v6EoR, pa.v6Withdraws, err = decodeMPUnreachNLRI(buf, len, v6AddPath)
 		case tcCommunity:
 			if ignoreComms {
 				_, err = io.CopyN(io.Discard, buf, len)
@@ -377,7 +377,7 @@ func decodeClusterList(b *bytes.Buffer, len int64) ([]string, error) {
 }
 
 // TODO: ap = AddPath AFs. Should really be a bool instead.
-func decodeIPv4NLRI(b *bytes.Reader, ap []addr) ([]v4Addr, error) {
+func decodeIPv4NLRI(b *bytes.Reader, addPath bool) ([]v4Addr, error) {
 	var addrs []v4Addr
 	for {
 		if b.Len() == 0 {
@@ -385,8 +385,7 @@ func decodeIPv4NLRI(b *bytes.Reader, ap []addr) ([]v4Addr, error) {
 		}
 
 		var id uint32
-		// YUCK
-		if len(ap) != 0 {
+		if addPath {
 			if err := binary.Read(b, binary.BigEndian, &id); err != nil {
 				return nil, err
 			}
@@ -413,7 +412,7 @@ func decodeIPv4NLRI(b *bytes.Reader, ap []addr) ([]v4Addr, error) {
 }
 
 // TODO: As above
-func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, error) {
+func decodeIPv6NLRI(b *bytes.Buffer, addPath bool) ([]v6Addr, error) {
 	var addrs []v6Addr
 	for {
 		if b.Len() == 0 {
@@ -421,8 +420,7 @@ func decodeIPv6NLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, error) {
 		}
 
 		var id uint32
-		// YUCK
-		if len(ap) != 0 {
+		if addPath {
 			if err := binary.Read(b, binary.BigEndian, &id); err != nil {
 				return nil, err
 			}
@@ -556,7 +554,7 @@ func getIPv6Prefix(b *bytes.Buffer, mask uint8) (net.IP, error) {
 	return net.IP(prefix.Bytes()), nil
 }
 
-func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
+func decodeMPReachNLRI(b *bytes.Buffer, addPath bool) ([]v6Addr, []string, error) {
 	// AFI/SAFI - For now I only IPv6 Unicast
 	var afi uint16
 	var safi uint8
@@ -607,13 +605,13 @@ func decodeMPReachNLRI(b *bytes.Buffer, ap []addr) ([]v6Addr, []string, error) {
 	}
 
 	// Pass the remainder of the buffer to be decoded into NLRI
-	nlri, err := decodeIPv6NLRI(b, ap)
+	nlri, err := decodeIPv6NLRI(b, addPath)
 	return nlri, nextHops, err
 
 }
 
 // Decodes IPv6 withdrawals (MP_UNREACH_NLRI)
-func decodeMPUnreachNLRI(b *bytes.Buffer, len int64, ap []addr) (bool, []v6Addr, error) {
+func decodeMPUnreachNLRI(b *bytes.Buffer, len int64, addPath bool) (bool, []v6Addr, error) {
 	if len == 3 {
 		// Just AFI (2 bytes) and SAFI (1 byte), no NLRI => End of RIB
 		b.Next(3)
@@ -624,11 +622,11 @@ func decodeMPUnreachNLRI(b *bytes.Buffer, len int64, ap []addr) (bool, []v6Addr,
 	b.Next(3)
 
 	// Decode the rest as withdrawn prefixes
-	nlri, err := decodeIPv6NLRI(b, ap)
+	nlri, err := decodeIPv6NLRI(b, addPath)
 	return false, nlri, err
 }
 
-func decodeIPv4Withdraws(wd []byte, ap []addr) (*prefixAttributes, error) {
+func decodeIPv4Withdraws(wd []byte, addPath bool) (*prefixAttributes, error) {
 	r := bytes.NewReader(wd)
 	var pa prefixAttributes
 	var addrs []v4Addr
@@ -638,7 +636,7 @@ func decodeIPv4Withdraws(wd []byte, ap []addr) (*prefixAttributes, error) {
 		}
 
 		var id uint32
-		if len(ap) != 0 {
+		if addPath {
 			if err := binary.Read(r, binary.BigEndian, &id); err != nil {
 				return nil, err
 			}

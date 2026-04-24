@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 
 	"github.com/mellowdrifter/routing_table"
@@ -23,10 +24,15 @@ import (
 )
 
 type bgpWatchServer struct {
-	listener net.Listener
-	peers    []*peer
-	mutex    sync.RWMutex
-	conf     config
+	listener     net.Listener
+	peers        []*peer
+	mutex        sync.RWMutex
+	globalMasksMu sync.RWMutex
+	v4Masks      map[int32]int32
+	v6Masks      map[int32]int32
+	v4PrefixRefs map[netip.Prefix]uint16
+	v6PrefixRefs map[netip.Prefix]uint16
+	conf         config
 }
 
 type config struct {
@@ -75,8 +81,12 @@ func main() {
 
 	// Start server
 	serv := bgpWatchServer{
-		mutex: sync.RWMutex{},
-		conf:  conf,
+		mutex:        sync.RWMutex{},
+		v4Masks:      make(map[int32]int32),
+		v6Masks:      make(map[int32]int32),
+		v4PrefixRefs: make(map[netip.Prefix]uint16),
+		v6PrefixRefs: make(map[netip.Prefix]uint16),
+		conf:         conf,
 	}
 	serv.listen(conf)
 	go serv.clean()
@@ -245,5 +255,55 @@ func (s *bgpWatchServer) remove(p *peer) {
 	p.mutex.Lock()
 	p.rib = routing_table.Rib{}
 	p.mutex.Unlock()
+}
+
+func (s *bgpWatchServer) addGlobalV4(newPrefixes []netip.Prefix) {
+	s.globalMasksMu.Lock()
+	defer s.globalMasksMu.Unlock()
+	for _, pfx := range newPrefixes {
+		if s.v4PrefixRefs[pfx] == 0 {
+			s.v4Masks[int32(pfx.Bits())]++
+		}
+		s.v4PrefixRefs[pfx]++
+	}
+}
+
+func (s *bgpWatchServer) removeGlobalV4(removedPrefixes []netip.Prefix) {
+	s.globalMasksMu.Lock()
+	defer s.globalMasksMu.Unlock()
+	for _, pfx := range removedPrefixes {
+		if s.v4PrefixRefs[pfx] > 0 {
+			s.v4PrefixRefs[pfx]--
+			if s.v4PrefixRefs[pfx] == 0 {
+				s.v4Masks[int32(pfx.Bits())]--
+				delete(s.v4PrefixRefs, pfx)
+			}
+		}
+	}
+}
+
+func (s *bgpWatchServer) addGlobalV6(newPrefixes []netip.Prefix) {
+	s.globalMasksMu.Lock()
+	defer s.globalMasksMu.Unlock()
+	for _, pfx := range newPrefixes {
+		if s.v6PrefixRefs[pfx] == 0 {
+			s.v6Masks[int32(pfx.Bits())]++
+		}
+		s.v6PrefixRefs[pfx]++
+	}
+}
+
+func (s *bgpWatchServer) removeGlobalV6(removedPrefixes []netip.Prefix) {
+	s.globalMasksMu.Lock()
+	defer s.globalMasksMu.Unlock()
+	for _, pfx := range removedPrefixes {
+		if s.v6PrefixRefs[pfx] > 0 {
+			s.v6PrefixRefs[pfx]--
+			if s.v6PrefixRefs[pfx] == 0 {
+				s.v6Masks[int32(pfx.Bits())]--
+				delete(s.v6PrefixRefs, pfx)
+			}
+		}
+	}
 }
 

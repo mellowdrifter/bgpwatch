@@ -68,6 +68,7 @@ message PeerStats {
   uint64 total_advertisements = 2;
   uint64 total_withdrawals = 3;
   uint64 rib_ram_bytes = 4;
+  bool add_path = 5;
 }
 
 message SystemStatsResponse {

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+	"runtime"
 
 	"github.com/mellowdrifter/routing_table"
 )
@@ -208,6 +209,10 @@ func (p *peer) HandleOpen() error {
 		log.Printf("eBGP session established with peer %s (AS %d)\n", p.ip, p.peerAsn)
 	}
 
+	if len(params.AddPath) > 0 {
+		log.Printf("BGP Add-Path enabled for peer %s\n", p.ip)
+	}
+
 	if p.establishedTime.IsZero() {
 		p.establishedTime = time.Now()
 	}
@@ -231,19 +236,29 @@ func (p *peer) handleNotification() error {
 func (p *peer) handleUpdate() error {
 	var pa prefixAttributes
 
+	v4AddPath := false
+	v6AddPath := false
+	for _, a := range p.param.AddPath {
+		if isIPv4Unicast(a) {
+			v4AddPath = true
+		}
+		if isIPv6Unicast(a) {
+			v6AddPath = true
+		}
+	}
+
 	var withdraw uint16
 	if err := binary.Read(p.in, binary.BigEndian, &withdraw); err != nil {
 		return err
 	}
 
 	// IPv4 withdraws are done here
-	// TODO: IPv4 Path ID withdraws?
 	if withdraw != 0 {
 		wbuf := make([]byte, withdraw)
 		if _, err := io.ReadFull(p.in, wbuf); err != nil {
 			return err
 		}
-		wd, err := decodeIPv4Withdraws(wbuf, p.param.AddPath)
+		wd, err := decodeIPv4Withdraws(wbuf, v4AddPath)
 		if err != nil {
 			return err
 		}
@@ -262,7 +277,7 @@ func (p *peer) handleUpdate() error {
 		pa.v4EoR = true
 		p.prefixes = &pa
 		p.mutex.Unlock()
-		
+
 		p.processRibUpdates()
 		return nil
 	}
@@ -271,7 +286,7 @@ func (p *peer) handleUpdate() error {
 		p.mutex.Lock()
 		p.prefixes = &pa
 		p.mutex.Unlock()
-		
+
 		p.processRibUpdates()
 		return nil
 	}
@@ -283,7 +298,7 @@ func (p *peer) handleUpdate() error {
 	}
 
 	// decode attributes
-	attr, err := decodePathAttributes(abuf, p.param.AddPath, p.server.conf.ignoreCommunities)
+	attr, err := decodePathAttributes(abuf, v6AddPath, p.server.conf.ignoreCommunities)
 	if err != nil {
 		return err
 	}
@@ -291,7 +306,7 @@ func (p *peer) handleUpdate() error {
 
 	// Any remaining bytes are IPv4 NLRI
 	if p.in.Len() > 0 {
-		v4prefixes, err := decodeIPv4NLRI(p.in, p.param.AddPath)
+		v4prefixes, err := decodeIPv4NLRI(p.in, v4AddPath)
 		if err != nil {
 			return err
 		}
@@ -343,12 +358,11 @@ func (p *peer) logUpdate() {
 
 		}
 		for _, prefix := range p.prefixes.v4prefixes {
-			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
-		}
-		// TODO: This only checks a single path for it's ID
-		// But each route could have this ID set, and it could be unique.
-		if p.prefixes.v4prefixes[0].ID != 0 {
-			log.Printf("With Path ID: %d\n", p.prefixes.v4prefixes[0].ID)
+			if prefix.ID != 0 {
+				log.Printf("%v/%d (Path ID %d)\n", prefix.Prefix, prefix.Mask, prefix.ID)
+			} else {
+				log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+			}
 		}
 	}
 
@@ -359,12 +373,11 @@ func (p *peer) logUpdate() {
 			log.Printf("Received the following IPv6 prefixes:")
 		}
 		for _, prefix := range p.prefixes.v6prefixes {
-			log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
-		}
-		// TODO: This only checks a single path for it's ID
-		// But each route could have this ID set, and it could be unique.
-		if p.prefixes.v6prefixes[0].ID != 0 {
-			log.Printf("With Path ID: %d\n", p.prefixes.v6prefixes[0].ID)
+			if prefix.ID != 0 {
+				log.Printf("%v/%d (Path ID %d)\n", prefix.Prefix, prefix.Mask, prefix.ID)
+			} else {
+				log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
+			}
 		}
 		log.Printf("With the following next-hops:")
 		for _, nh := range p.prefixes.v6NextHops {
@@ -499,7 +512,10 @@ func (p *peer) processRibUpdates() {
 				v4w = append(v4w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 			}
 		}
-		p.rib.DeleteIPv4Batch(v4w)
+		removedV4 := p.rib.DeleteIPv4Batch(v4w)
+		if len(removedV4) > 0 {
+			p.server.removeGlobalV4(removedV4)
+		}
 	}
 
 	if len(prefixes.v6Withdraws) > 0 {
@@ -510,7 +526,10 @@ func (p *peer) processRibUpdates() {
 				v6w = append(v6w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 			}
 		}
-		p.rib.DeleteIPv6Batch(v6w)
+		removedV6 := p.rib.DeleteIPv6Batch(v6w)
+		if len(removedV6) > 0 {
+			p.server.removeGlobalV6(removedV6)
+		}
 	}
 
 	// Process announcements
@@ -529,7 +548,10 @@ func (p *peer) processRibUpdates() {
 					})
 				}
 			}
-			p.rib.InsertIPv4Batch(v4a)
+			newV4 := p.rib.InsertIPv4Batch(v4a)
+			if len(newV4) > 0 {
+				p.server.addGlobalV4(newV4)
+			}
 		}
 
 		if len(prefixes.v6prefixes) > 0 {
@@ -544,12 +566,22 @@ func (p *peer) processRibUpdates() {
 					})
 				}
 			}
-			p.rib.InsertIPv6Batch(v6a)
+			newV6 := p.rib.InsertIPv6Batch(v6a)
+			if len(newV6) > 0 {
+				p.server.addGlobalV6(newV6)
+			}
 		}
 	}
 
 	if prefixes.v4EoR || prefixes.v6EoR {
 		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6", 
 			p.ip, p.rib.V4Count(), p.rib.V6Count())
+		
+		// Force garbage collection to free memory from the initial full table dump burst
+		go func() {
+			time.Sleep(5 * time.Second) // wait slightly to ensure batch is fully processed
+			runtime.GC()
+			log.Printf("Garbage collector forced after EoR for peer %s", p.ip)
+		}()
 	}
 }

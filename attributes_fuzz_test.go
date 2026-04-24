@@ -12,7 +12,7 @@ func FuzzDecodePathAttributes(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte, ignoreComms bool) {
 		// We don't care about the result, only that it doesn't panic
-		_, _ = decodePathAttributes(data, nil, ignoreComms)
+		_, _ = decodePathAttributes(data, false, ignoreComms)
 	})
 }
 
@@ -21,7 +21,7 @@ func FuzzDecodeIPv4Withdraws(f *testing.F) {
 	f.Add([]byte{32, 8, 8, 8, 8})
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = decodeIPv4Withdraws(data, nil)
+		_, _ = decodeIPv4Withdraws(data, false)
 	})
 }
 
@@ -30,7 +30,7 @@ func FuzzDecodeIPv4NLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r := bytes.NewReader(data)
-		_, _ = decodeIPv4NLRI(r, nil)
+		_, _ = decodeIPv4NLRI(r, false)
 	})
 }
 
@@ -39,7 +39,7 @@ func FuzzDecodeIPv6NLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := bytes.NewBuffer(data)
-		_, _ = decodeIPv6NLRI(buf, nil)
+		_, _ = decodeIPv6NLRI(buf, false)
 	})
 }
 
@@ -49,7 +49,7 @@ func FuzzDecodeMPReachNLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := bytes.NewBuffer(data)
-		_, _, _ = decodeMPReachNLRI(buf, nil)
+		_, _, _ = decodeMPReachNLRI(buf, false)
 	})
 }
 
@@ -59,6 +59,6 @@ func FuzzDecodeMPUnreachNLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := bytes.NewBuffer(data)
-		_, _, _ = decodeMPUnreachNLRI(buf, int64(len(data)), nil)
+		_, _, _ = decodeMPUnreachNLRI(buf, int64(len(data)), false)
 	})
 }

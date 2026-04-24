@@ -30,55 +30,37 @@ type grpcServer struct {
 func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsResponse, error) {
 	peers := g.snapshotPeers()
 
-	seenV4 := make(map[netip.Prefix]struct{})
-	seenV6 := make(map[netip.Prefix]struct{})
 	var totalV4Paths, totalV6Paths int64
-
 	for _, p := range peers {
-		p.mutex.RLock()
-		totalV4Paths += int64(p.rib.V4Count())
-		totalV6Paths += int64(p.rib.V6Count())
-		for _, pfx := range p.rib.AllPrefixesIPv4() {
-			seenV4[pfx] = struct{}{}
-		}
-		for _, pfx := range p.rib.AllPrefixesIPv6() {
-			seenV6[pfx] = struct{}{}
-		}
-		p.mutex.RUnlock()
+		totalV4Paths += int64(p.rib.V4PathCount())
+		totalV6Paths += int64(p.rib.V6PathCount())
 	}
 
+	g.bgp.globalMasksMu.RLock()
+	ipv4Count := int32(len(g.bgp.v4PrefixRefs))
+	ipv6Count := int32(len(g.bgp.v6PrefixRefs))
+	g.bgp.globalMasksMu.RUnlock()
+
 	return &pb.TotalsResponse{
-		Ipv4Count:      int32(len(seenV4)),
-		Ipv6Count:      int32(len(seenV6)),
+		Ipv4Count:      ipv4Count,
+		Ipv6Count:      ipv6Count,
 		TotalIpv4Paths: totalV4Paths,
 		TotalIpv6Paths: totalV6Paths,
 	}, nil
 }
 
 func (g *grpcServer) GetMasks(ctx context.Context, in *pb.Empty) (*pb.MasksResponse, error) {
-	peers := g.snapshotPeers()
-
 	v4masks := make(map[int32]int32)
 	v6masks := make(map[int32]int32)
-	seenV4 := make(map[netip.Prefix]struct{})
-	seenV6 := make(map[netip.Prefix]struct{})
 
-	for _, p := range peers {
-		p.mutex.RLock()
-		for _, pfx := range p.rib.AllPrefixesIPv4() {
-			if _, ok := seenV4[pfx]; !ok {
-				seenV4[pfx] = struct{}{}
-				v4masks[int32(pfx.Bits())]++
-			}
-		}
-		for _, pfx := range p.rib.AllPrefixesIPv6() {
-			if _, ok := seenV6[pfx]; !ok {
-				seenV6[pfx] = struct{}{}
-				v6masks[int32(pfx.Bits())]++
-			}
-		}
-		p.mutex.RUnlock()
+	g.bgp.globalMasksMu.RLock()
+	for k, v := range g.bgp.v4Masks {
+		v4masks[k] = v
 	}
+	for k, v := range g.bgp.v6Masks {
+		v6masks[k] = v
+	}
+	g.bgp.globalMasksMu.RUnlock()
 
 	return &pb.MasksResponse{
 		Ipv4Masks: v4masks,
@@ -124,6 +106,7 @@ func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
 			TotalAdvertisements:        p.updates,
 			TotalWithdrawals:           p.withdraws,
 			RibRamBytes:                peerRam,
+			AddPath:                    len(p.param.AddPath) > 0,
 		}
 		p.mutex.RUnlock()
 	}
@@ -302,17 +285,10 @@ func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]r
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
 
-	var r *routing_table.Route
 	if ip.Is4() {
-		r = rib.SearchIPv4(ip)
-	} else {
-		r = rib.SearchIPv6(ip)
+		return rib.AllPathsSearchIPv4(ip), nil
 	}
-
-	if r == nil {
-		return nil, nil
-	}
-	return []routing_table.Route{*r}, nil
+	return rib.AllPathsSearchIPv6(ip), nil
 }
 
 

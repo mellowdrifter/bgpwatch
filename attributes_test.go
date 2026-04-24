@@ -85,7 +85,7 @@ func TestDecodeNLRI(t *testing.T) {
 	}
 	for _, test := range tests {
 		buf := bytes.NewReader(test.input)
-		got, _ := decodeIPv4NLRI(buf, nil)
+		got, _ := decodeIPv4NLRI(buf, false)
 
 		if !cmp.Equal(got, test.want) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
@@ -286,7 +286,7 @@ func TestDecodeMPReachNLRI(t *testing.T) {
 	}
 	for _, test := range tests {
 		buf := bytes.NewBuffer(test.input)
-		ip, nh, _ := decodeMPReachNLRI(buf, nil)
+		ip, nh, _ := decodeMPReachNLRI(buf, false)
 
 		if !cmp.Equal(nh, test.wantNH) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, nh, test.wantNH)
@@ -367,7 +367,7 @@ func TestDecodePathAttributes(t *testing.T) {
 	}
 	for _, test := range tests {
 
-		got, _ := decodePathAttributes(test.input, nil, false)
+		got, _ := decodePathAttributes(test.input, false, false)
 		if !cmp.Equal(got, test.want, cmp.AllowUnexported(pathAttr{})) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)
 		}

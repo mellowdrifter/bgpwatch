@@ -121,17 +121,19 @@ func decodeCapability(cap []byte, p *parameters) error {
 			if _, err := io.CopyN(buf, r, int64(cap.Length)); err != nil {
 				return err
 			}
-			addr, ok, err := decodeAddPath(buf)
-			if err != nil {
-				return err
+			for buf.Len() >= 4 {
+				addr, ok, err := decodeAddPath(buf)
+				if err != nil {
+					return err
+				}
+				if ok {
+					p.AddPath = append(p.AddPath, addr)
+				}
 			}
-			if !ok {
-				log.Printf("Peer is not configured to send multiple paths")
-				continue
+			if len(p.AddPath) > 0 {
+				log.Printf("AddPath supported")
+				p.Supported = append(p.Supported, cap.Code)
 			}
-			log.Printf("AddPath supported")
-			p.AddPath = append(p.AddPath, addr)
-			p.Supported = append(p.Supported, cap.Code)
 
 		default:
 			log.Printf("Capability Code %d is unsupported", cap.Code)
