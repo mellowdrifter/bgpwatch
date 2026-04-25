@@ -27,7 +27,7 @@ const (
 	Cease           = 6
 
 	// min and max BGP message size in bytes
-	MinMessage = 19
+	MinMessage         = 19
 	MaxMessage         = 4096
 	MaxExtendedMessage = 65535
 
@@ -64,10 +64,10 @@ func CreateKeepAlive() []byte {
 func CreateOpen(asn uint32, holdtime uint16, rid BGPID, p *Parameters) []byte {
 	var b bytes.Buffer
 	writeMarker(&b)
-	
+
 	// Header placeholder
 	b.Write([]byte{0, 0, Open})
-	
+
 	b.WriteByte(bgpVersion)
 	b.Write(getOpenASN(asn))
 	b.Write(uint16ToByte(holdtime))
@@ -89,7 +89,7 @@ func CreateNotification(code, subcode uint8) []byte {
 	b.Write([]byte{0, 0, Notification})
 	b.WriteByte(code)
 	b.WriteByte(subcode)
-	
+
 	buf := b.Bytes()
 	setSizeOfMessage(&buf)
 	return buf
@@ -132,11 +132,10 @@ func createParameters(p *Parameters, asn uint32) ([]byte, uint8) {
 		0, // refresh size 0
 		cap4Byte,
 		4, // 4 byte ASN size 4
-		capExtendedMessage,
-		0, // size 0
 	}
 	param = append(param, initial...)
 	param = append(param, uint32ToByte(asn)...)
+	param = append(param, capExtendedMessage, 0)
 
 	for _, a := range p.AddrFamilies {
 		if isIPv4Unicast(a) {
