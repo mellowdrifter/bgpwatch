@@ -164,20 +164,29 @@ func (s *Server) remove(p *peer) {
 	log.Printf("Removing dead peer %s\n", p.conn.RemoteAddr().String())
 
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	for i, check := range s.peers {
 		if check == p {
 			s.peers = append(s.peers[:i], s.peers[i+1:]...)
 			break
 		}
 	}
+	s.mutex.Unlock()
+
 	p.conn.Close()
 
-	// Clean up peer's memory
+	// Clean up global refs and peer's memory
 	p.mutex.Lock()
+	v4Prefixes := p.rib.AllPrefixesIPv4()
+	v6Prefixes := p.rib.AllPrefixesIPv6()
 	p.rib = routing_table.Rib{}
 	p.mutex.Unlock()
+
+	if len(v4Prefixes) > 0 {
+		s.removeGlobalV4(v4Prefixes)
+	}
+	if len(v6Prefixes) > 0 {
+		s.removeGlobalV6(v6Prefixes)
+	}
 }
 
 func (s *Server) addGlobalV4(newPrefixes []netip.Prefix) {
