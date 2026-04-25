@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    env:
+      GO_VERSION: "1.26.2"
+      COVERAGE_THRESHOLD: 70
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Download deps
+        run: go mod download
+
+      # 🧪 Run tests with coverage
+      - name: Run tests
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic
+
+      # 📊 Enforce coverage threshold
+      - name: Check coverage
+        run: |
+          total=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: $total%"
+          threshold=${COVERAGE_THRESHOLD}
+          awk -v total="$total" -v threshold="$threshold" 'BEGIN { exit (total < threshold) }'
+
+      # 🔍 Lint (golangci-lint)
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      # (Optional) Upload coverage artifact
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
