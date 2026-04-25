@@ -1,8 +1,6 @@
 bgpwatch
 go.sum
-proto/bgpwatch_grpc.pb.go
-proto/bgpwatch.pb.go
-go.sum
+proto/*.pb.go
 bugs.md
 plan_addpath.md
 plan_drop_global_rib.md
