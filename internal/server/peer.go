@@ -327,9 +327,8 @@ func (p *peer) logUpdate() {
 
 	log.Println("----------------------")
 	p.mutex.RLock()
-	defer p.mutex.RUnlock()
-	
 	if p.prefixes == nil {
+		p.mutex.RUnlock()
 		return
 	}
 
@@ -384,12 +383,12 @@ func (p *peer) logUpdate() {
 		p.eor = true
 	}
 
+	p.mutex.RUnlock()
+
 	// Empty out the prefixes field
-	go func() {
-		p.mutex.Lock()
-		p.prefixes = nil
-		p.mutex.Unlock()
-	}()
+	p.mutex.Lock()
+	p.prefixes = nil
+	p.mutex.Unlock()
 }
 
 func mapAttributes(pa *bgp.PathAttr) *routing_table.RouteAttributes {
