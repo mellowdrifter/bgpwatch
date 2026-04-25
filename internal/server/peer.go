@@ -213,11 +213,15 @@ func (p *peer) HandleOpen() error {
 }
 
 func (p *peer) handleNotification() error {
-	var code, subcode uint8
-	binary.Read(p.in, binary.BigEndian, &code)
-	binary.Read(p.in, binary.BigEndian, &subcode)
+	var code uint8
+	if err := binary.Read(p.in, binary.BigEndian, &code); err != nil {
+		return fmt.Errorf("reading notification code: %w", err)
+	}
+	var subcode uint8
+	if err := binary.Read(p.in, binary.BigEndian, &subcode); err != nil {
+		return fmt.Errorf("reading notification subcode: %w", err)
+	}
 	log.Printf("Notification received from %s: code %d, subcode %d\n", p.ip, code, subcode)
-	p.conn.Close()
 	return nil
 }
 
