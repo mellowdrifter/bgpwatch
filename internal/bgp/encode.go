@@ -145,10 +145,10 @@ func createParameters(p *Parameters, asn uint32) ([]byte, uint8) {
 	}
 
 	for _, a := range p.AddPath {
-		if isIPv4Unicast(a) {
+		if a.AFI == 1 && a.SAFI == 1 {
 			param = append(param, []byte{capAddPath, 4, 0, 1, 1, 1}...)
 		}
-		if isIPv6Unicast(a) {
+		if a.AFI == 2 && a.SAFI == 1 {
 			param = append(param, []byte{capAddPath, 4, 0, 2, 1, 1}...)
 		}
 	}

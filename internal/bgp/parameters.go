@@ -21,7 +21,7 @@ const (
 type Parameters struct {
 	ASN32        [4]byte
 	Refresh      bool
-	AddPath      []Addr
+	AddPath      []AddPathCapability
 	AddrFamilies []Addr
 	Supported    []uint8
 	Unsupported  []uint8
@@ -31,6 +31,12 @@ type Addr struct {
 	AFI  uint16
 	_    uint8
 	SAFI uint8
+}
+
+type AddPathCapability struct {
+	AFI         uint16
+	SAFI        uint8
+	SendReceive uint8 // 1 = receive, 2 = send, 3 = both
 }
 
 type parameterHeader struct {
@@ -159,12 +165,10 @@ func decodeAfiSafi(b *bytes.Buffer) (Addr, error) {
 	return a, nil
 }
 
-func decodeAddPath(b *bytes.Buffer) (Addr, error) {
-	var a Addr
+func decodeAddPath(b *bytes.Buffer) (AddPathCapability, error) {
+	var a AddPathCapability
 	if err := binary.Read(b, binary.BigEndian, &a); err != nil {
 		return a, err
 	}
-	// The 4th byte is the send/receive capability.
-	// 1 = receive, 2 = send, 3 = both
 	return a, nil
 }

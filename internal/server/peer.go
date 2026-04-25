@@ -227,10 +227,10 @@ func (p *peer) handleUpdate() error {
 	v4AddPath := false
 	v6AddPath := false
 	for _, a := range p.param.AddPath {
-		if a.AFI == 1 && a.SAFI == 1 {
+		if a.AFI == 1 && a.SAFI == 1 && (a.SendReceive&2) != 0 {
 			v4AddPath = true
 		}
-		if a.AFI == 2 && a.SAFI == 1 {
+		if a.AFI == 2 && a.SAFI == 1 && (a.SendReceive&2) != 0 {
 			v6AddPath = true
 		}
 	}
