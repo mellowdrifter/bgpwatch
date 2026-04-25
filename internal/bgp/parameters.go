@@ -14,17 +14,19 @@ const (
 	// capability codes I support
 	capMpBgp   uint8 = 1
 	cap4Byte   uint8 = 65
-	capAddPath uint8 = 69
-	capRefresh uint8 = 70 // Only support enhanced refresh
+	capExtendedMessage uint8 = 6
+	capAddPath         uint8 = 69
+	capRefresh         uint8 = 70 // Only support enhanced refresh
 )
 
 type Parameters struct {
-	ASN32        [4]byte
-	Refresh      bool
-	AddPath      []AddPathCapability
-	AddrFamilies []Addr
-	Supported    []uint8
-	Unsupported  []uint8
+	ASN32           [4]byte
+	Refresh         bool
+	ExtendedMessage bool
+	AddPath         []AddPathCapability
+	AddrFamilies    []Addr
+	Supported       []uint8
+	Unsupported     []uint8
 }
 
 type Addr struct {
@@ -95,6 +97,13 @@ func decodeCapability(cap []byte, p *Parameters) error {
 
 		buf := bytes.NewBuffer(make([]byte, 0, msgCap.Length))
 		switch msgCap.Code {
+		case capExtendedMessage:
+			p.ExtendedMessage = true
+			p.Supported = append(p.Supported, msgCap.Code)
+			if _, err := io.CopyN(io.Discard, r, int64(msgCap.Length)); err != nil {
+				return err
+			}
+
 		case cap4Byte:
 			log.Printf("4byte ASN supported")
 			if _, err := io.CopyN(buf, r, int64(msgCap.Length)); err != nil {

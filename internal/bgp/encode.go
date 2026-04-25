@@ -28,7 +28,8 @@ const (
 
 	// min and max BGP message size in bytes
 	MinMessage = 19
-	MaxMessage = 4096
+	MaxMessage         = 4096
+	MaxExtendedMessage = 65535
 
 	// AFI/SAFI
 	afiIPv4     uint16 = 1
@@ -131,6 +132,8 @@ func createParameters(p *Parameters, asn uint32) ([]byte, uint8) {
 		0, // refresh size 0
 		cap4Byte,
 		4, // 4 byte ASN size 4
+		capExtendedMessage,
+		0, // size 0
 	}
 	param = append(param, initial...)
 	param = append(param, uint32ToByte(asn)...)

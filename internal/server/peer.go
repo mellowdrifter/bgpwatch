@@ -43,7 +43,6 @@ type peer struct {
 	startTime       time.Time
 	establishedTime time.Time
 	in            *bytes.Reader
-	out           *bytes.Buffer
 	prefixes      *bgp.PrefixAttributes
 	rib           routing_table.Rib
 }
@@ -51,7 +50,12 @@ type peer struct {
 func (p *peer) peerWorker() {
 	defer p.server.remove(p)
 	for {
-		msg, err := getMessage(p.conn)
+		maxLen := uint16(bgp.MaxMessage)
+		if p.param.ExtendedMessage {
+			maxLen = bgp.MaxExtendedMessage
+		}
+
+		msg, err := getMessage(p.conn, maxLen)
 		if err != nil {
 			log.Printf("Bad BGP message: %v\n", err)
 			p.conn.Close()
@@ -104,7 +108,7 @@ func (p *peer) peerWorker() {
 	}
 }
 
-func getMessage(c net.Conn) ([]byte, error) {
+func getMessage(c net.Conn, maxLen uint16) ([]byte, error) {
 	header := make([]byte, 18)
 	if _, err := io.ReadFull(c, header); err != nil {
 		return nil, err
@@ -115,8 +119,8 @@ func getMessage(c net.Conn) ([]byte, error) {
 	}
 
 	msgLen := int(binary.BigEndian.Uint16(header[16:]))
-	if msgLen < bgp.MinMessage || msgLen > bgp.MaxMessage {
-		return nil, fmt.Errorf("invalid BGP message length: %d", msgLen)
+	if msgLen < bgp.MinMessage || msgLen > int(maxLen) {
+		return nil, fmt.Errorf("invalid BGP message length: %d (max: %d)", msgLen, maxLen)
 	}
 
 	remLen := msgLen - 18

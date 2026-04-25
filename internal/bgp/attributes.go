@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"strconv"
@@ -221,7 +220,7 @@ func DecodePathAttributes(attr []byte, v6AddPath bool, ignoreComms bool) (*PathA
 			pa.ClusterList, err = decodeClusterList(buf, length64)
 
 		default:
-			_, err = io.CopyN(ioutil.Discard, buf, length64)
+			_, err = io.CopyN(io.Discard, buf, length64)
 		}
 
 		if err != nil {
@@ -341,7 +340,7 @@ func decodeLargeCommunities(b *bytes.Buffer, length int64) ([]LargeCommunity, er
 }
 
 func decodeExtendedCommunities(b *bytes.Buffer, length int64) ([]ExtendCommunity, error) {
-	if _, err := io.CopyN(ioutil.Discard, b, length); err != nil {
+	if _, err := io.CopyN(io.Discard, b, length); err != nil {
 		return nil, err
 	}
 	return nil, nil

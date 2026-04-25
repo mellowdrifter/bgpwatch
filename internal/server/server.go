@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -148,14 +147,17 @@ func (s *Server) accept(conn net.Conn) *peer {
 		weor:      s.Conf.Eor,
 		quiet:    s.Conf.Quiet,
 		ip:        ip,
-		out:       bytes.NewBuffer(make([]byte, 4096)),
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
 		rib:       routing_table.GetNewRib(),
 	}
 
 	s.peers = append(s.peers, peer)
-	log.Printf("New peer added to list: %+v\n", s.peers)
+	peerIPs := make([]string, len(s.peers))
+	for i, p := range s.peers {
+		peerIPs[i] = p.ip
+	}
+	log.Printf("Peer list after add: %v\n", peerIPs)
 
 	return peer
 }
