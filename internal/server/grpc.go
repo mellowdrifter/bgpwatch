@@ -1,17 +1,17 @@
-package main
+package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"regexp"
 	"runtime"
 	"strings"
 	"time"
-	"encoding/json"
-	"net/http"
 
 	"github.com/mellowdrifter/bogons"
 	"github.com/mellowdrifter/routing_table"
@@ -24,7 +24,7 @@ import (
 
 type grpcServer struct {
 	pb.UnimplementedBGPWatchServer
-	bgp *bgpWatchServer
+	bgp *Server
 }
 
 func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsResponse, error) {
@@ -80,7 +80,7 @@ func (g *grpcServer) GetSystemStats(ctx context.Context, in *pb.Empty) (*pb.Syst
 	return g.bgp.collectStats(), nil
 }
 
-func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
+func (s *Server) collectStats() *pb.SystemStatsResponse {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
@@ -124,9 +124,6 @@ func (s *bgpWatchServer) collectStats() *pb.SystemStatsResponse {
 }
 
 // GetRoute looks up a route by IP address (LPM) or CIDR prefix (exact match).
-// The address field is parsed server-side: if it contains a "/" it is treated
-// as an exact prefix match, otherwise as a longest prefix match.
-// Bogon addresses are rejected before lookup.
 func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.RouteLookupResponse, error) {
 	addr := strings.TrimSpace(in.GetAddress())
 	if addr == "" {
@@ -155,22 +152,7 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 	// Pick best candidate
 	bestIdx := 0
 	for i := 1; i < len(candidates); i++ {
-		curr := candidates[i]
-		best := candidates[bestIdx]
-
-		better := false
-		if curr.Attributes.LocalPref > best.Attributes.LocalPref {
-			better = true
-		} else if curr.Attributes.LocalPref == best.Attributes.LocalPref {
-			if len(curr.Attributes.AsPath) < len(best.Attributes.AsPath) {
-				better = true
-			} else if len(curr.Attributes.AsPath) == len(best.Attributes.AsPath) {
-				if curr.PathID < best.PathID {
-					better = true
-				}
-			}
-		}
-		if better {
+		if g.isBetter(candidates[i], candidates[bestIdx]) {
 			bestIdx = i
 		}
 	}
@@ -203,10 +185,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 		return nil, status.Error(codes.InvalidArgument, "address is required")
 	}
 
-	g.bgp.mutex.RLock()
-	peers := make([]*peer, len(g.bgp.peers))
-	copy(peers, g.bgp.peers)
-	g.bgp.mutex.RUnlock()
+	peers := g.snapshotPeers()
 
 	var results []*pb.Route
 	for _, p := range peers {
@@ -291,8 +270,6 @@ func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]r
 	return rib.AllPathsSearchIPv6(ip), nil
 }
 
-
-// formatRouteCommunities renders standard BGP communities as structured messages.
 func formatRouteCommunities(communities []uint32) []*pb.Community {
 	if len(communities) == 0 {
 		return nil
@@ -307,7 +284,6 @@ func formatRouteCommunities(communities []uint32) []*pb.Community {
 	return result
 }
 
-// formatRouteLargeCommunities renders large communities as structured messages.
 func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []*pb.LargeCommunity {
 	if len(lc) == 0 {
 		return nil
@@ -323,7 +299,6 @@ func formatRouteLargeCommunities(lc []routing_table.LargeCommunity) []*pb.LargeC
 	return result
 }
 
-// GetPrefixesByOrigin returns all IPv4 and IPv6 prefixes originated by the given ASN (lightweight).
 func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.PrefixesResponse, error) {
 	asn := in.GetAsn()
 	if asn == 0 {
@@ -361,7 +336,6 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 	}, nil
 }
 
-// GetRoutesByOrigin returns all IPv4 and IPv6 routes originated by the given ASN (detailed).
 func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest) (*pb.RoutesResponse, error) {
 	asn := in.GetAsn()
 	if asn == 0 {
@@ -402,7 +376,6 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 	}, nil
 }
 
-// GetPrefixesByAsPath returns all IPv4 and IPv6 prefixes matching the given AS path regex.
 func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathRequest) (*pb.RoutesResponse, error) {
 	regexStr := in.GetRegex()
 	if regexStr == "" {
@@ -462,12 +435,10 @@ func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
 }
 
 func ciscoRegexpToGo(cisco string) string {
-	// Cisco _ matches delimiters (start, end, space, comma, etc.)
-	// Our AS path is space-separated.
 	return strings.ReplaceAll(cisco, "_", "(?:^| +|$)")
 }
 
-func (s *bgpWatchServer) startGRPC(port int) {
+func (s *Server) startGRPC(port int) {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Fatalf("failed to listen for gRPC: %v", err)

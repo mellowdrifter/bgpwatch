@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -17,9 +17,9 @@ type ConfigFile struct {
 	Peers []PeerConfig `json:"peers"`
 }
 
-// loadConfigFile reads and parses the JSON configuration file.
+// LoadConfigFile reads and parses the JSON configuration file.
 // It returns a map of IP address strings to PeerConfig for O(1) lookups.
-func loadConfigFile(filename string) (map[string]PeerConfig, error) {
+func LoadConfigFile(filename string) (map[string]PeerConfig, error) {
 	if filename == "" {
 		return nil, fmt.Errorf("config filename is empty")
 	}

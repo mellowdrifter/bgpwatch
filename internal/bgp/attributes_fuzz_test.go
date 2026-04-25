@@ -1,4 +1,4 @@
-package main
+package bgp
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ func FuzzDecodePathAttributes(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte, ignoreComms bool) {
 		// We don't care about the result, only that it doesn't panic
-		_, _ = decodePathAttributes(data, false, ignoreComms)
+		_, _ = DecodePathAttributes(data, false, ignoreComms)
 	})
 }
 
@@ -21,7 +21,7 @@ func FuzzDecodeIPv4Withdraws(f *testing.F) {
 	f.Add([]byte{32, 8, 8, 8, 8})
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = decodeIPv4Withdraws(data, false)
+		_, _ = DecodeIPv4Withdraws(data, false)
 	})
 }
 
@@ -30,7 +30,7 @@ func FuzzDecodeIPv4NLRI(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r := bytes.NewReader(data)
-		_, _ = decodeIPv4NLRI(r, false)
+		_, _ = DecodeIPv4NLRI(r, false)
 	})
 }
 

@@ -1,4 +1,4 @@
-package main
+package bgp
 
 import (
 	"testing"

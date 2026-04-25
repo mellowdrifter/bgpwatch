@@ -1,9 +1,10 @@
-package main
+package server
 
 import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/mellowdrifter/bgpwatch/internal/bgp"
 )
 
 func TestGetRid(t *testing.T) {
@@ -11,7 +12,7 @@ func TestGetRid(t *testing.T) {
 		desc    string
 		srid    string
 		wantErr bool
-		want    bgpid
+		want    bgp.BGPID
 	}{
 		{
 			desc:    "empty",
@@ -35,21 +36,21 @@ func TestGetRid(t *testing.T) {
 		{
 			desc: "default RID",
 			srid: "0.0.0.1",
-			want: bgpid{0x0, 0x0, 0x0, 0x1},
+			want: bgp.BGPID{0x0, 0x0, 0x0, 0x1},
 		},
 		{
 			desc: "regular RID",
 			srid: "9.8.7.6",
-			want: bgpid{0x9, 0x8, 0x7, 0x6},
+			want: bgp.BGPID{0x9, 0x8, 0x7, 0x6},
 		},
 		{
 			desc: "max RID",
 			srid: "255.255.255.255",
-			want: bgpid{0xff, 0xff, 0xff, 0xff},
+			want: bgp.BGPID{0xff, 0xff, 0xff, 0xff},
 		},
 	}
 	for _, test := range tests {
-		got, err := getRid(&test.srid)
+		got, err := GetRid(test.srid)
 		if test.wantErr {
 			if err == nil {
 				t.Errorf("Test (%s): wanted error but none received", test.desc)

@@ -1,4 +1,4 @@
-package main
+package bgp
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ func TestDecodeOptionalParameters(t *testing.T) {
 	tests := []struct {
 		desc  string
 		input []byte
-		want  parameters
+		want  Parameters
 	}{
 		{
 			desc: "All capabilities under a single capability field",
@@ -18,11 +18,11 @@ func TestDecodeOptionalParameters(t *testing.T) {
 				0x02, 0x16, 0x01, 0x04, 0x00, 0x01, 0x00, 0x01, 0x02, 0x00, 0x40, 0x02,
 				0x00, 0x78, 0x41, 0x04, 0x00, 0x00, 0xfc, 0x15, 0x46, 0x00, 0x47, 0x00,
 			},
-			want: parameters{
+			want: Parameters{
 				ASN32:   [4]byte{0x00, 0x00, 0xfc, 0x15},
 				Refresh: true,
-				AddrFamilies: []addr{
-					addr{
+				AddrFamilies: []Addr{
+					Addr{
 						AFI:  1,
 						SAFI: 1,
 					},
@@ -33,16 +33,15 @@ func TestDecodeOptionalParameters(t *testing.T) {
 		},
 		{
 			desc: "All capabilities under seperate capability fields",
-			// This has both 2 and 128 - route refresh and Cisco route refresh. Should I consider that refresh == 2 ?
 			input: []byte{
 				0x02, 0x06, 0x01, 0x04, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x80, 0x00,
 				0x02, 0x02, 0x02, 0x00,
 			},
-			want: parameters{
+			want: Parameters{
 				ASN32:   [4]byte{0x00, 0x00, 0x00, 0x00},
 				Refresh: false,
-				AddrFamilies: []addr{
-					addr{
+				AddrFamilies: []Addr{
+					Addr{
 						AFI:  1,
 						SAFI: 1,
 					},
@@ -53,7 +52,7 @@ func TestDecodeOptionalParameters(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		got, _ := decodeOptionalParameters(&test.input)
+		got, _ := DecodeOptionalParameters(&test.input)
 
 		if !cmp.Equal(got, test.want) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)

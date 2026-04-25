@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package main
+package server
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (s *bgpWatchServer) listen(c config) {
+func (s *Server) listen(c Config) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, rc syscall.RawConn) error {
 			var sockErr error
@@ -31,8 +31,8 @@ func (s *bgpWatchServer) listen(c config) {
 				}
 
 				// Apply TCP MD5 option for each peer that has a password
-				if c.peersConfig != nil {
-					for _, peerConf := range c.peersConfig {
+				if c.PeersConfig != nil {
+					for _, peerConf := range c.PeersConfig {
 						if peerConf.Password == "" {
 							continue
 						}
@@ -93,10 +93,10 @@ func (s *bgpWatchServer) listen(c config) {
 	// Disable MPTCP as it is incompatible with TCP_MD5SIG
 	lc.SetMultipathTCP(false)
 
-	l, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", c.port))
+	l, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
 		log.Fatalf("Unable to start server: %v", err)
 	}
 	s.listener = l
-	log.Printf("Listening on port %d (Linux with MD5 support)\n", c.port)
+	log.Printf("Listening on port %d (Linux with MD5 support)\n", c.Port)
 }
