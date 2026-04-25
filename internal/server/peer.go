@@ -295,6 +295,7 @@ func (p *peer) handleUpdate() error {
 	}
 
 	if pa.Attr != nil {
+		pa.V4NextHop = pa.Attr.NextHopv4
 		pa.V6prefixes = pa.Attr.Ipv6NLRI
 		pa.V6NextHops = pa.Attr.NextHopsv6
 		pa.V6EoR = pa.Attr.V6EoR
@@ -340,6 +341,9 @@ func (p *peer) logUpdate() {
 			} else {
 				log.Printf("%v/%d\n", prefix.Prefix, prefix.Mask)
 			}
+		}
+		if p.prefixes.V4NextHop != "" {
+			log.Printf("With next-hop: %s", p.prefixes.V4NextHop)
 		}
 	}
 

@@ -114,7 +114,6 @@ type PrefixAttributes struct {
 	V6prefixes  []V6Addr
 	V4Withdraws []V4Addr
 	V6Withdraws []V6Addr
-	// TODO: Fill this in
 	V4NextHop  string
 	V6NextHops []string
 	V4EoR      bool
