@@ -107,6 +107,7 @@ func (s *Server) clean() {
 
 		for _, p := range dead {
 			log.Printf("Holdtimer expired for %s", p.conn.RemoteAddr().String())
+			p.conn.Write(bgp.CreateNotification(bgp.HoldTimeExpired, 0))
 			p.conn.Close()
 		}
 	}
