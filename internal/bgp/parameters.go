@@ -20,6 +20,29 @@ const (
 	capGracefulRestart uint8 = 64
 )
 
+var capMap = map[uint8]string{
+	1:   "Multiprotocol Extensions for BGP-4",
+	2:   "Route Refresh Capability for BGP-4",
+	3:   "Outbound Route Filtering Capability",
+	4:   "Multiple Routes to Destination Capability",
+	5:   "Extended Next Hop Encoding",
+	6:   "Extended Message Capability",
+	7:   "BGPsec Capability",
+	8:   "Multiple Labels Capability",
+	9:   "BGP Role",
+	64:  "Graceful Restart Capability",
+	65:  "Support for 4-octet AS number capability",
+	67:  "Support for Dynamic Capability",
+	68:  "Multisession BGP Capability",
+	69:  "ADD-PATH Capability",
+	70:  "Enhanced Route Refresh Capability",
+	71:  "Long-Lived Graceful Restart (LLGR) Capability",
+	72:  "Routing Policy Distribution",
+	73:  "FQDN Capability",
+	128: "Route Refresh Capability (deprecated)",
+}
+
+
 type Parameters struct {
 	ASN32           [4]byte
 	Refresh         bool
@@ -107,7 +130,7 @@ func decodeCapability(cap []byte, p *Parameters) error {
 			}
 
 		case cap4Byte:
-			log.Printf("4byte ASN supported")
+			log.Printf("%s supported", capMap[msgCap.Code])
 			if _, err := io.CopyN(buf, r, int64(msgCap.Length)); err != nil {
 				return err
 			}
@@ -119,12 +142,12 @@ func decodeCapability(cap []byte, p *Parameters) error {
 			p.Supported = append(p.Supported, msgCap.Code)
 
 		case capRefresh:
-			log.Printf("Route refresh supported")
+			log.Printf("%s supported", capMap[msgCap.Code])
 			p.Refresh = true
 			p.Supported = append(p.Supported, msgCap.Code)
 
 		case capMpBgp:
-			log.Printf("Multi-protocol BGP supported")
+			log.Printf("%s supported", capMap[msgCap.Code])
 			if _, err := io.CopyN(buf, r, int64(msgCap.Length)); err != nil {
 				return err
 			}
@@ -136,7 +159,7 @@ func decodeCapability(cap []byte, p *Parameters) error {
 			p.Supported = append(p.Supported, msgCap.Code)
 
 		case capAddPath:
-			log.Printf("BGP Add-Path supported")
+			log.Printf("%s supported", capMap[msgCap.Code])
 			if _, err := io.CopyN(buf, r, int64(msgCap.Length)); err != nil {
 				return err
 			}
@@ -149,14 +172,18 @@ func decodeCapability(cap []byte, p *Parameters) error {
 			}
 			p.Supported = append(p.Supported, msgCap.Code)
 		case capGracefulRestart:
-			log.Printf("Graceful restart supported")
+			log.Printf("%s supported", capMap[msgCap.Code])
 			p.GracefulRestart = true
 			p.Supported = append(p.Supported, msgCap.Code)
 			if _, err := io.CopyN(io.Discard, r, int64(msgCap.Length)); err != nil {
 				return err
 			}
 		default:
-			log.Printf("Capability %d is not supported", msgCap.Code)
+			if desc, ok := capMap[msgCap.Code]; ok {
+				log.Printf("%s is not supported", desc)
+			} else {
+				log.Printf("Capability %d is not supported", msgCap.Code)
+			}
 			p.Unsupported = append(p.Unsupported, msgCap.Code)
 			if _, err := io.CopyN(io.Discard, r, int64(msgCap.Length)); err != nil {
 				return err

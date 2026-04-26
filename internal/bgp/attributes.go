@@ -32,21 +32,21 @@ const (
 var (
 	// Some attributes here were deprecated a while back, while others
 	// were added in RFC8093
-	isDeprecated = map[uint8]bool{
-		11:  true,
-		12:  true,
-		13:  true,
-		19:  true,
-		20:  true,
-		21:  true,
-		28:  true,
-		30:  true,
-		31:  true,
-		129: true,
-		241: true,
-		242: true,
-		243: true,
-		50:  true,
+	deprecatedAttrs = map[uint8]string{
+		11:  "DPA",
+		12:  "ADVERTISER",
+		13:  "RCID_PATH / CLUSTER_ID",
+		19:  "SAPT",
+		20:  "Connector Attribute",
+		21:  "AS_PATHLIMIT",
+		28:  "BGP Entropy Label",
+		30:  "BGP PCAP",
+		31:  "BGP PREDICT",
+		129: "BGP Identifier",
+		241: "BGP Prefix SID",
+		242: "BGP-LS Attribute",
+		243: "BGP-LS Prefix SID",
+		50:  "BGP ASPA",
 	}
 )
 
@@ -227,8 +227,8 @@ func DecodePathAttributes(attr []byte, v6AddPath bool, ignoreComms bool) (*PathA
 			return nil, err
 		}
 
-		if isDeprecated[ah.Type.Code] {
-			log.Printf("Type Code %d is deprecated", ah.Type.Code)
+		if desc, ok := deprecatedAttrs[ah.Type.Code]; ok {
+			log.Printf("Path Attribute %s (%d) is deprecated", desc, ah.Type.Code)
 		}
 	}
 	return &pa, nil
