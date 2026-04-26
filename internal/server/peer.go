@@ -311,6 +311,9 @@ func (p *peer) handleUpdate() error {
 	}
 
 	p.mutex.Lock()
+	if pa.V4EoR || pa.V6EoR {
+		p.eor = true
+	}
 	p.prefixes = &pa
 	p.mutex.Unlock()
 

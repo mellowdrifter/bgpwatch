@@ -38,10 +38,8 @@ func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsRes
 
 	var totalV4Paths, totalV6Paths int64
 	for _, p := range peers {
-		p.mutex.RLock()
 		totalV4Paths += int64(p.rib.V4PathCount())
 		totalV6Paths += int64(p.rib.V6PathCount())
-		p.mutex.RUnlock()
 	}
 
 	g.bgp.globalMasksMu.RLock()
@@ -89,14 +87,16 @@ func (g *grpcServer) snapshotPeers() []*peer {
 }
 
 func (g *grpcServer) checkReady() error {
-	g.bgp.mutex.RLock()
-	defer g.bgp.mutex.RUnlock()
-	for _, p := range g.bgp.peers {
+	peers := g.snapshotPeers()
+	for _, p := range peers {
 		p.mutex.RLock()
-		ready := p.eor
+		wantEor := p.weor
+		gotEor := p.eor
+		peerIP := p.ip
 		p.mutex.RUnlock()
-		if !ready {
-			return status.Errorf(codes.Unavailable, "daemon is busy synchronizing routing tables (waiting for EoR from %s)", anonymizePeer(p.ip))
+
+		if wantEor && !gotEor {
+			return status.Errorf(codes.Unavailable, "daemon is busy synchronizing routing tables (waiting for EoR from %s)", anonymizePeer(peerIP))
 		}
 	}
 	return nil
@@ -118,12 +118,12 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 	var totalPeerRam uint64
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range peers {
-		p.mutex.RLock()
 		pmem := p.rib.MemoryUsage()
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
 			pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
 		totalPeerRam += peerRam
 
+		p.mutex.RLock()
 		var duration uint64
 		if !p.establishedTime.IsZero() {
 			duration = uint64(time.Since(p.establishedTime).Seconds())
@@ -167,9 +167,7 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 	var peerIPs []string
 
 	for _, p := range peers {
-		p.mutex.RLock()
 		r, err := g.performLookup(p.rib, addr)
-		p.mutex.RUnlock()
 		if err != nil {
 			continue
 		}
@@ -227,9 +225,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 
 	var results []*pb.Route
 	for _, p := range peers {
-		p.mutex.RLock()
 		routes, err := g.performMultiLookup(p.rib, addr)
-		p.mutex.RUnlock()
 		if err != nil {
 			continue
 		}
@@ -358,7 +354,6 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 	var results []*pb.Prefix
 
 	for _, p := range peers {
-		p.mutex.RLock()
 		v4, v6 := p.rib.PrefixesByOriginASN(asn)
 		for _, r := range v4 {
 			if _, ok := seen[r.Prefix]; !ok {
@@ -372,7 +367,6 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 				results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
 			}
 		}
-		p.mutex.RUnlock()
 	}
 
 	return &pb.PrefixesResponse{
@@ -402,7 +396,6 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 	prefixToBest := make(map[netip.Prefix]candidate)
 
 	for _, p := range peers {
-		p.mutex.RLock()
 		v4, v6 := p.rib.PrefixesByOriginASN(asn)
 		all := append(v4, v6...)
 		for _, r := range all {
@@ -411,7 +404,6 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
 			}
 		}
-		p.mutex.RUnlock()
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
@@ -448,7 +440,6 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 	prefixToBest := make(map[netip.Prefix]candidate)
 
 	for _, p := range peers {
-		p.mutex.RLock()
 		v4, v6 := p.rib.PrefixesByAsPathRegex(re)
 		all := append(v4, v6...)
 		for _, r := range all {
@@ -457,7 +448,6 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
 			}
 		}
-		p.mutex.RUnlock()
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
