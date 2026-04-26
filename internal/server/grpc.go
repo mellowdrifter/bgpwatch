@@ -496,18 +496,21 @@ func (s *Server) startGRPC(port int) {
 	reflection.Register(srv)
 
 	// Add HTTP wrapper for system stats
-	go func() {
-		http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+	if s.Conf.HttpPort > 0 {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 			stats := s.collectStats()
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			json.NewEncoder(w).Encode(stats)
 		})
-		log.Printf("HTTP stats server listening on port 1180\n")
-		if err := http.ListenAndServe(":1180", nil); err != nil {
-			log.Printf("HTTP server failed: %v\n", err)
-		}
-	}()
+		go func() {
+			log.Printf("HTTP stats server listening on port %d\n", s.Conf.HttpPort)
+			if err := http.ListenAndServe(fmt.Sprintf(":%d", s.Conf.HttpPort), mux); err != nil {
+				log.Printf("HTTP server failed: %v\n", err)
+			}
+		}()
+	}
 
 	log.Printf("gRPC server listening on port %d\n", port)
 	if err := srv.Serve(lis); err != nil {

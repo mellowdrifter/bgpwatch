@@ -136,6 +136,7 @@ func createParameters(p *Parameters, asn uint32) ([]byte, uint8) {
 	param = append(param, initial...)
 	param = append(param, uint32ToByte(asn)...)
 	param = append(param, capExtendedMessage, 0)
+	param = append(param, capGracefulRestart, 6, 0, 0, 0, 1, 1, 0) // IPv4 Unicast GR
 
 	for _, a := range p.AddrFamilies {
 		if isIPv4Unicast(a) {

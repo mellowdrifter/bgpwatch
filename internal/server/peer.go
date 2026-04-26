@@ -24,27 +24,27 @@ var (
 )
 
 type peer struct {
-	server        *Server
-	peerAsn       uint32
-	isIBGP        bool
-	holdtime      uint16
-	ip            string
-	conn          net.Conn
-	eor           bool
-	weor          bool
-	quiet         bool
-	mutex         sync.RWMutex
-	param         bgp.Parameters
-	rid           bgp.BGPID
-	keepalives    uint64
-	lastKeepalive time.Time
-	updates       uint64
-	withdraws     uint64
+	server          *Server
+	peerAsn         uint32
+	isIBGP          bool
+	holdtime        uint16
+	ip              string
+	conn            net.Conn
+	eor             bool
+	weor            bool
+	quiet           bool
+	mutex           sync.RWMutex
+	param           bgp.Parameters
+	rid             bgp.BGPID
+	keepalives      uint64
+	lastKeepalive   time.Time
+	updates         uint64
+	withdraws       uint64
 	startTime       time.Time
 	establishedTime time.Time
-	in            *bytes.Reader
-	prefixes      *bgp.PrefixAttributes
-	rib           routing_table.Rib
+	in              *bytes.Reader
+	prefixes        *bgp.PrefixAttributes
+	rib             routing_table.Rib
 }
 
 func (p *peer) peerWorker() {
@@ -144,13 +144,12 @@ func (p *peer) HandleKeepalive() error {
 	p.keepalives++
 	p.lastKeepalive = time.Now()
 	p.mutex.Unlock()
-	log.Printf("received keepalive #%d from %s\n", p.keepalives, p.ip)
 	return nil
 }
 
 func (p *peer) HandleOpen() error {
 	log.Printf("Received Open Message from %s", p.ip)
-	
+
 	var version uint8
 	if err := binary.Read(p.in, binary.BigEndian, &version); err != nil {
 		return err
@@ -163,17 +162,17 @@ func (p *peer) HandleOpen() error {
 	if err := binary.Read(p.in, binary.BigEndian, &asn16); err != nil {
 		return err
 	}
-	
+
 	var holdtime uint16
 	if err := binary.Read(p.in, binary.BigEndian, &holdtime); err != nil {
 		return err
 	}
-	
+
 	var rid bgp.BGPID
 	if err := binary.Read(p.in, binary.BigEndian, &rid); err != nil {
 		return err
 	}
-	
+
 	var paramLen uint8
 	if err := binary.Read(p.in, binary.BigEndian, &paramLen); err != nil {
 		return err
@@ -517,9 +516,9 @@ func (p *peer) processRibUpdates() {
 	}
 
 	if prefixes.V4EoR || prefixes.V6EoR {
-		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6", 
+		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6",
 			p.ip, p.rib.V4Count(), p.rib.V6Count())
-		
+
 		go func() {
 			time.Sleep(5 * time.Second)
 			runtime.GC()

@@ -17,11 +17,13 @@ const (
 	capExtendedMessage uint8 = 6
 	capAddPath         uint8 = 69
 	capRefresh         uint8 = 70 // Only support enhanced refresh
+	capGracefulRestart uint8 = 64
 )
 
 type Parameters struct {
 	ASN32           [4]byte
 	Refresh         bool
+	GracefulRestart bool
 	ExtendedMessage bool
 	AddPath         []AddPathCapability
 	AddrFamilies    []Addr
@@ -146,7 +148,13 @@ func decodeCapability(cap []byte, p *Parameters) error {
 				p.AddPath = append(p.AddPath, a)
 			}
 			p.Supported = append(p.Supported, msgCap.Code)
-
+		case capGracefulRestart:
+			log.Printf("Graceful restart supported")
+			p.GracefulRestart = true
+			p.Supported = append(p.Supported, msgCap.Code)
+			if _, err := io.CopyN(io.Discard, r, int64(msgCap.Length)); err != nil {
+				return err
+			}
 		default:
 			log.Printf("Capability %d is not supported", msgCap.Code)
 			p.Unsupported = append(p.Unsupported, msgCap.Code)

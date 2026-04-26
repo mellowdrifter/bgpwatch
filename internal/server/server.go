@@ -30,6 +30,7 @@ type Config struct {
 	Rid               bgp.BGPID
 	Port              int
 	GrpcPort          int
+	HttpPort          int
 	Logfile           string
 	Eor               bool
 	Quiet             bool

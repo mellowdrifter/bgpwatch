@@ -1,4 +1,4 @@
-.PHONY: all build test clean proto
+.PHONY: all build test clean proto integration
 
 BINARY_NAME=bgpwatch
 
@@ -17,6 +17,9 @@ test:
 clean:
 	go clean
 	rm -f $(BINARY_NAME)
+
+integration:
+	go test -tags integration -v -count=1 -timeout 120s ./integration/
 
 fuzz:
 	go test -fuzz=FuzzDecodePathAttributes -fuzztime 20s ./internal/bgp
