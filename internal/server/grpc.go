@@ -38,8 +38,12 @@ func (g *grpcServer) GetTotals(ctx context.Context, in *pb.Empty) (*pb.TotalsRes
 
 	var totalV4Paths, totalV6Paths int64
 	for _, p := range peers {
-		totalV4Paths += int64(p.rib.V4PathCount())
-		totalV6Paths += int64(p.rib.V6PathCount())
+		if p.v4rib != nil {
+			totalV4Paths += int64(p.v4rib.PathCount())
+		}
+		if p.v6rib != nil {
+			totalV6Paths += int64(p.v6rib.PathCount())
+		}
 	}
 
 	g.bgp.globalMasksMu.RLock()
@@ -118,7 +122,13 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 	var totalPeerRam uint64
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range peers {
-		pmem := p.rib.MemoryUsage()
+		var pmem routing_table.MemoryStats
+		if p.v4rib != nil {
+			pmem = p.v4rib.MemoryUsage()
+		} else if p.v6rib != nil {
+			pmem = p.v6rib.MemoryUsage()
+		}
+
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
 			pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
 		totalPeerRam += peerRam
@@ -167,7 +177,7 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 	var peerIPs []string
 
 	for _, p := range peers {
-		r, err := g.performLookup(p.rib, addr)
+		r, err := g.performLookup(p, addr)
 		if err != nil {
 			continue
 		}
@@ -225,7 +235,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 
 	var results []*pb.Route
 	for _, p := range peers {
-		routes, err := g.performMultiLookup(p.rib, addr)
+		routes, err := g.performMultiLookup(p, addr)
 		if err != nil {
 			continue
 		}
@@ -238,7 +248,7 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 	return &pb.RoutesResponse{Routes: results}, nil
 }
 
-func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing_table.Route, error) {
+func (g *grpcServer) performLookup(p *peer, addr string) (*routing_table.Route, error) {
 	if strings.Contains(addr, "/") {
 		prefix, err := netip.ParsePrefix(addr)
 		if err != nil {
@@ -251,10 +261,13 @@ func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing
 			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
 		}
 
-		if ip.Is4() {
-			return rib.LookupIPv4(prefix), nil
+		if ip.Is4() && p.v4rib != nil {
+			return p.v4rib.Lookup(prefix), nil
 		}
-		return rib.LookupIPv6(prefix), nil
+		if ip.Is6() && p.v6rib != nil {
+			return p.v6rib.Lookup(prefix), nil
+		}
+		return nil, nil
 	}
 
 	ip, err := netip.ParseAddr(addr)
@@ -266,13 +279,16 @@ func (g *grpcServer) performLookup(rib routing_table.Rib, addr string) (*routing
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
 
-	if ip.Is4() {
-		return rib.SearchIPv4(ip), nil
+	if ip.Is4() && p.v4rib != nil {
+		return p.v4rib.Search(ip), nil
 	}
-	return rib.SearchIPv6(ip), nil
+	if ip.Is6() && p.v6rib != nil {
+		return p.v6rib.Search(ip), nil
+	}
+	return nil, nil
 }
 
-func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]routing_table.Route, error) {
+func (g *grpcServer) performMultiLookup(p *peer, addr string) ([]routing_table.Route, error) {
 	if strings.Contains(addr, "/") {
 		prefix, err := netip.ParsePrefix(addr)
 		if err != nil {
@@ -285,10 +301,13 @@ func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]r
 			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
 		}
 
-		if ip.Is4() {
-			return rib.AllPathsIPv4(prefix), nil
+		if ip.Is4() && p.v4rib != nil {
+			return p.v4rib.AllPaths(prefix), nil
 		}
-		return rib.AllPathsIPv6(prefix), nil
+		if ip.Is6() && p.v6rib != nil {
+			return p.v6rib.AllPaths(prefix), nil
+		}
+		return nil, nil
 	}
 
 	ip, err := netip.ParseAddr(addr)
@@ -300,10 +319,13 @@ func (g *grpcServer) performMultiLookup(rib routing_table.Rib, addr string) ([]r
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
 
-	if ip.Is4() {
-		return rib.AllPathsSearchIPv4(ip), nil
+	if ip.Is4() && p.v4rib != nil {
+		return p.v4rib.AllPathsSearch(ip), nil
 	}
-	return rib.AllPathsSearchIPv6(ip), nil
+	if ip.Is6() && p.v6rib != nil {
+		return p.v6rib.AllPathsSearch(ip), nil
+	}
+	return nil, nil
 }
 
 func formatRouteCommunities(communities []uint32) []*pb.Community {
@@ -354,7 +376,13 @@ func (g *grpcServer) GetPrefixesByOrigin(ctx context.Context, in *pb.OriginReque
 	var results []*pb.Prefix
 
 	for _, p := range peers {
-		v4, v6 := p.rib.PrefixesByOriginASN(asn)
+		var v4, v6 []routing_table.Route
+		if p.v4rib != nil {
+			v4 = p.v4rib.PrefixesByOriginASN(asn)
+		}
+		if p.v6rib != nil {
+			v6 = p.v6rib.PrefixesByOriginASN(asn)
+		}
 		for _, r := range v4 {
 			if _, ok := seen[r.Prefix]; !ok {
 				seen[r.Prefix] = struct{}{}
@@ -396,8 +424,13 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 	prefixToBest := make(map[netip.Prefix]candidate)
 
 	for _, p := range peers {
-		v4, v6 := p.rib.PrefixesByOriginASN(asn)
-		all := append(v4, v6...)
+		var all []routing_table.Route
+		if p.v4rib != nil {
+			all = p.v4rib.PrefixesByOriginASN(asn)
+		}
+		if p.v6rib != nil {
+			all = append(all, p.v6rib.PrefixesByOriginASN(asn)...)
+		}
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {
@@ -440,8 +473,13 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 	prefixToBest := make(map[netip.Prefix]candidate)
 
 	for _, p := range peers {
-		v4, v6 := p.rib.PrefixesByAsPathRegex(re)
-		all := append(v4, v6...)
+		var all []routing_table.Route
+		if p.v4rib != nil {
+			all = p.v4rib.PrefixesByAsPathRegex(re)
+		}
+		if p.v6rib != nil {
+			all = append(all, p.v6rib.PrefixesByAsPathRegex(re)...)
+		}
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {

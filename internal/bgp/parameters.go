@@ -171,13 +171,6 @@ func decodeCapability(cap []byte, p *Parameters) error {
 				p.AddPath = append(p.AddPath, a)
 			}
 			p.Supported = append(p.Supported, msgCap.Code)
-		case capGracefulRestart:
-			log.Printf("%s supported", capMap[msgCap.Code])
-			p.GracefulRestart = true
-			p.Supported = append(p.Supported, msgCap.Code)
-			if _, err := io.CopyN(io.Discard, r, int64(msgCap.Length)); err != nil {
-				return err
-			}
 		default:
 			if desc, ok := capMap[msgCap.Code]; ok {
 				log.Printf("%s is not supported", desc)

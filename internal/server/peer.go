@@ -8,7 +8,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -44,7 +44,8 @@ type peer struct {
 	establishedTime time.Time
 	in              *bytes.Reader
 	prefixes        *bgp.PrefixAttributes
-	rib             routing_table.Rib
+	v4rib           *routing_table.IPv4Rib
+	v6rib           *routing_table.IPv6Rib
 }
 
 func (p *peer) peerWorker() {
@@ -212,6 +213,36 @@ func (p *peer) HandleOpen() error {
 	if p.establishedTime.IsZero() {
 		p.establishedTime = time.Now()
 	}
+
+	// Initialize RIBs based on negotiated capabilities
+	v4 := false
+	v6 := false
+	for _, f := range p.param.AddrFamilies {
+		if f.AFI == 1 {
+			v4 = true
+		} else if f.AFI == 2 {
+			v6 = true
+		}
+	}
+	for _, f := range p.param.AddPath {
+		if f.AFI == 1 {
+			v4 = true
+		} else if f.AFI == 2 {
+			v6 = true
+		}
+	}
+	// If no MP-BGP or Add-Path caps, it defaults to IPv4 (legacy)
+	if !v4 && !v6 {
+		v4 = true
+	}
+
+	if v4 && p.v4rib == nil {
+		p.v4rib = routing_table.NewIPv4Rib()
+	}
+	if v6 && p.v6rib == nil {
+		p.v6rib = routing_table.NewIPv6Rib()
+	}
+
 	return nil
 }
 
@@ -446,7 +477,7 @@ func (p *peer) processRibUpdates() {
 	p.mutex.Unlock()
 
 	// Process withdrawals
-	if len(prefixes.V4Withdraws) > 0 {
+	if len(prefixes.V4Withdraws) > 0 && p.v4rib != nil {
 		var v4w []routing_table.PrefixWithID
 		for _, w := range prefixes.V4Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
@@ -454,13 +485,13 @@ func (p *peer) processRibUpdates() {
 				v4w = append(v4w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 			}
 		}
-		removedV4 := p.rib.DeleteIPv4Batch(v4w)
+		removedV4 := p.v4rib.DeleteBatch(v4w)
 		if len(removedV4) > 0 {
 			p.server.removeGlobalV4(removedV4)
 		}
 	}
 
-	if len(prefixes.V6Withdraws) > 0 {
+	if len(prefixes.V6Withdraws) > 0 && p.v6rib != nil {
 		var v6w []routing_table.PrefixWithID
 		for _, w := range prefixes.V6Withdraws {
 			if ip, ok := netip.AddrFromSlice(w.Prefix); ok {
@@ -468,7 +499,7 @@ func (p *peer) processRibUpdates() {
 				v6w = append(v6w, routing_table.PrefixWithID{Prefix: prefix, PathID: w.ID})
 			}
 		}
-		removedV6 := p.rib.DeleteIPv6Batch(v6w)
+		removedV6 := p.v6rib.DeleteBatch(v6w)
 		if len(removedV6) > 0 {
 			p.server.removeGlobalV6(removedV6)
 		}
@@ -478,7 +509,7 @@ func (p *peer) processRibUpdates() {
 	if prefixes.Attr != nil && (len(prefixes.V4prefixes) > 0 || len(prefixes.V6prefixes) > 0) {
 		ra := mapAttributes(prefixes.Attr)
 
-		if len(prefixes.V4prefixes) > 0 {
+		if len(prefixes.V4prefixes) > 0 && p.v4rib != nil {
 			var v4a []routing_table.Route
 			for _, pfx := range prefixes.V4prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
@@ -490,13 +521,13 @@ func (p *peer) processRibUpdates() {
 					})
 				}
 			}
-			newV4 := p.rib.InsertIPv4Batch(v4a)
+			newV4 := p.v4rib.InsertBatch(v4a)
 			if len(newV4) > 0 {
 				p.server.addGlobalV4(newV4)
 			}
 		}
 
-		if len(prefixes.V6prefixes) > 0 {
+		if len(prefixes.V6prefixes) > 0 && p.v6rib != nil {
 			var v6a []routing_table.Route
 			for _, pfx := range prefixes.V6prefixes {
 				if ip, ok := netip.AddrFromSlice(pfx.Prefix); ok {
@@ -508,7 +539,7 @@ func (p *peer) processRibUpdates() {
 					})
 				}
 			}
-			newV6 := p.rib.InsertIPv6Batch(v6a)
+			newV6 := p.v6rib.InsertBatch(v6a)
 			if len(newV6) > 0 {
 				p.server.addGlobalV6(newV6)
 			}
@@ -516,13 +547,21 @@ func (p *peer) processRibUpdates() {
 	}
 
 	if prefixes.V4EoR || prefixes.V6EoR {
+		v4c, v6c := 0, 0
+		if p.v4rib != nil {
+			v4c = p.v4rib.Count()
+		}
+		if p.v6rib != nil {
+			v6c = p.v6rib.Count()
+		}
 		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6",
-			p.ip, p.rib.V4Count(), p.rib.V6Count())
+			p.ip, v4c, v6c)
 
 		go func() {
-			time.Sleep(5 * time.Second)
-			runtime.GC()
-			log.Printf("Garbage collector forced after EoR for peer %s", p.ip)
+			time.Sleep(15 * time.Second)
+			log.Printf("Running FreeOSMemory after EoR convergence for peer %s", p.ip)
+			debug.FreeOSMemory()
+			log.Printf("FreeOSMemory complete for peer %s", p.ip)
 		}()
 	}
 }

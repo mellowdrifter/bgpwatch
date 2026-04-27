@@ -5,25 +5,25 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/bgp"
-	"github.com/mellowdrifter/routing_table"
 )
 
 type Server struct {
-	listener     net.Listener
-	peers        []*peer
-	mutex        sync.RWMutex
+	listener      net.Listener
+	peers         []*peer
+	mutex         sync.RWMutex
 	globalMasksMu sync.RWMutex
-	v4Masks      map[int32]int32
-	v6Masks      map[int32]int32
-	v4PrefixRefs map[netip.Prefix]uint16
-	v6PrefixRefs map[netip.Prefix]uint16
-	Conf         Config
+	v4Masks       map[int32]int32
+	v6Masks       map[int32]int32
+	v4PrefixRefs  map[netip.Prefix]uint16
+	v6PrefixRefs  map[netip.Prefix]uint16
+	Conf          Config
 }
 
 type Config struct {
@@ -54,7 +54,7 @@ func (s *Server) Start() {
 	s.listen(s.Conf)
 	go s.clean()
 	go s.startGRPC(s.Conf.GrpcPort)
-	
+
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -146,11 +146,10 @@ func (s *Server) accept(conn net.Conn) *peer {
 		conn:      conn,
 		rid:       s.Conf.Rid,
 		weor:      s.Conf.Eor,
-		quiet:    s.Conf.Quiet,
+		quiet:     s.Conf.Quiet,
 		ip:        ip,
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
-		rib:       routing_table.GetNewRib(),
 	}
 
 	s.peers = append(s.peers, peer)
@@ -180,9 +179,16 @@ func (s *Server) remove(p *peer) {
 
 	// Clean up global refs and peer's memory
 	p.mutex.Lock()
-	v4Prefixes := p.rib.AllPrefixesIPv4()
-	v6Prefixes := p.rib.AllPrefixesIPv6()
-	p.rib = routing_table.Rib{}
+	var v4Prefixes []netip.Prefix
+	var v6Prefixes []netip.Prefix
+	if p.v4rib != nil {
+		v4Prefixes = p.v4rib.AllPrefixes()
+		p.v4rib = nil
+	}
+	if p.v6rib != nil {
+		v6Prefixes = p.v6rib.AllPrefixes()
+		p.v6rib = nil
+	}
 	p.mutex.Unlock()
 
 	if len(v4Prefixes) > 0 {
@@ -191,6 +197,13 @@ func (s *Server) remove(p *peer) {
 	if len(v6Prefixes) > 0 {
 		s.removeGlobalV6(v6Prefixes)
 	}
+
+	go func() {
+		time.Sleep(5 * time.Second)
+		log.Printf("Running FreeOSMemory after peer %s removal", p.ip)
+		debug.FreeOSMemory()
+		log.Printf("Memory cleanup complete after peer %s removal", p.ip)
+	}()
 }
 
 func (s *Server) addGlobalV4(newPrefixes []netip.Prefix) {
