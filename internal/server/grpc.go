@@ -123,10 +123,13 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range peers {
 		var pmem routing_table.MemoryStats
+		var attrCount uint64
 		if p.v4rib != nil {
 			pmem = p.v4rib.MemoryUsage()
+			attrCount = uint64(p.v4rib.AttributeCount())
 		} else if p.v6rib != nil {
 			pmem = p.v6rib.MemoryUsage()
+			attrCount = uint64(p.v6rib.AttributeCount())
 		}
 
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
@@ -145,6 +148,7 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			TotalWithdrawals:           p.withdraws,
 			RibRamBytes:                peerRam,
 			AddPath:                    len(p.param.AddPath) > 0,
+			UniqueAttributes:           attrCount,
 		}
 		p.mutex.RUnlock()
 	}
