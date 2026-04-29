@@ -153,6 +153,8 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 		p.mutex.RUnlock()
 	}
 
+	ps := s.sampler.Get()
+
 	return &pb.SystemStatsResponse{
 		TotalAppRamBytes:     m.Sys,
 		HeapAllocBytes:       m.HeapAlloc,
@@ -162,6 +164,8 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 		NumGc:                m.NumGC,
 		TotalPeerRibRamBytes: totalPeerRam,
 		PeerStats:            peerStats,
+		PssBytes:             uint64(ps.PSSBytes),
+		RssBytes:             uint64(ps.RSSBytes),
 	}
 }
 

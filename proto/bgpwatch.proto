@@ -81,6 +81,8 @@ message SystemStatsResponse {
   uint32 num_gc = 6;
   uint64 total_peer_rib_ram_bytes = 7;
   map<string, PeerStats> peer_stats = 8;
+  uint64 pss_bytes = 9;
+  uint64 rss_bytes = 10;
 }
 
 

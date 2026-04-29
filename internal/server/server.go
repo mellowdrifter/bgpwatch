@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/bgp"
+	"github.com/mellowdrifter/bgpwatch/internal/procstats"
 )
 
 type Server struct {
@@ -23,6 +24,7 @@ type Server struct {
 	v6Masks       map[int32]int32
 	v4PrefixRefs  map[netip.Prefix]uint16
 	v6PrefixRefs  map[netip.Prefix]uint16
+	sampler       *procstats.Sampler
 	Conf          Config
 }
 
@@ -46,6 +48,7 @@ func New(conf Config) *Server {
 		v6Masks:      make(map[int32]int32),
 		v4PrefixRefs: make(map[netip.Prefix]uint16),
 		v6PrefixRefs: make(map[netip.Prefix]uint16),
+		sampler:      procstats.NewSampler(30 * time.Second),
 		Conf:         conf,
 	}
 }
