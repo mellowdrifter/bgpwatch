@@ -536,3 +536,313 @@ func TestFullTablePerformance(t *testing.T) {
 	t.Logf("Regex search against %d routes took %v", count, time.Since(start))
 }
 
+func TestAddPathZeroID(t *testing.T) {
+	t.Log("Testing BGP Add-Path with PathID 0 (non-compliant)")
+	bgpPort, grpcPort := portPair(16)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	// Announce with PathID 0. GoBGP API might allow it.
+	announceIPv4WithPathID(t, gobgp, "1.1.1.0", 24, "10.0.0.1", []uint32{100}, 0)
+
+	client := grpcClient(t, grpcPort)
+	// We check if it's present. If GoBGP rejected it, the count will be 0.
+	// If bgpwatch rejected it, the count will be 0.
+	// Either way, we ensure no crash.
+	time.Sleep(2 * time.Second)
+	resp, err := client.GetTotals(context.Background(), &pb.Empty{})
+	require.NoError(t, err)
+	t.Logf("Prefixes with PathID 0: %d", resp.Ipv4Count)
+}
+
+func TestAddPathImplicitWithdrawal(t *testing.T) {
+	t.Log("Testing BGP Add-Path implicit withdrawal (same ID, different attributes)")
+	bgpPort, grpcPort := portPair(17)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	prefix := "2.2.2.0/24"
+	// 1. First announcement
+	announceIPv4WithPathID(t, gobgp, "2.2.2.0", 24, "10.0.0.1", []uint32{100}, 1)
+	// 2. Second announcement (different AS path)
+	announceIPv4WithPathID(t, gobgp, "2.2.2.0", 24, "10.0.0.1", []uint32{200}, 1)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix})
+		return err == nil && len(resp.Routes) == 1
+	}, 10*time.Second)
+
+	resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix})
+	require.NoError(t, err)
+	require.Len(t, resp.Routes, 1)
+	// GoBGP prepends 64500
+	require.Equal(t, []uint32{64500, 200}, resp.Routes[0].AsPath)
+}
+
+func TestAddPathPartialWithdrawal(t *testing.T) {
+	t.Log("Testing BGP Add-Path partial withdrawal")
+	bgpPort, grpcPort := portPair(18)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	prefix := "3.3.3.0"
+	announceIPv4WithPathID(t, gobgp, prefix, 24, "10.0.0.1", []uint32{100}, 1)
+	announceIPv4WithPathID(t, gobgp, prefix, 24, "10.0.0.1", []uint32{200}, 2)
+	announceIPv4WithPathID(t, gobgp, prefix, 24, "10.0.0.1", []uint32{300}, 3)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+		return err == nil && len(resp.Routes) == 3
+	}, 10*time.Second)
+
+	// Withdraw PathID 2
+	withdrawIPv4WithPathID(t, gobgp, prefix, 24, 2)
+
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+		return err == nil && len(resp.Routes) == 2
+	}, 10*time.Second)
+
+	resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+	require.NoError(t, err)
+	for _, r := range resp.Routes {
+		require.NotEqual(t, uint32(2), r.PathId)
+	}
+}
+
+func TestAddPathUnknownWithdrawal(t *testing.T) {
+	t.Log("Testing BGP Add-Path withdrawal for unknown PathID")
+	bgpPort, grpcPort := portPair(19)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	prefix := "4.4.4.0"
+	announceIPv4WithPathID(t, gobgp, prefix, 24, "10.0.0.1", []uint32{100}, 1)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+		return err == nil && len(resp.Routes) == 1
+	}, 10*time.Second)
+
+	// Withdraw unknown PathID 99
+	withdrawIPv4WithPathID(t, gobgp, prefix, 24, 99)
+
+	// Ensure PathID 1 survives and no crash
+	time.Sleep(2 * time.Second)
+	resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+	require.NoError(t, err)
+	require.Len(t, resp.Routes, 1)
+	require.Equal(t, uint32(1), resp.Routes[0].PathId)
+}
+
+func TestMultiPeerOverlappingPathIDs(t *testing.T) {
+	t.Log("Testing Multiple senders with overlapping PathIDs")
+	bgpPort, grpcPort := portPair(20)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	// Peer 1
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64500, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP1()
+	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
+
+	// Peer 2
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64501, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, true)
+	defer stopGoBGP2()
+	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
+
+	prefix := "5.5.5.0"
+	// Both use PathID 1
+	announceIPv4WithPathID(t, gobgp1, prefix, 24, "10.0.0.1", []uint32{100}, 1)
+	announceIPv4WithPathID(t, gobgp2, prefix, 24, "10.0.0.2", []uint32{200}, 1)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+		return err == nil && len(resp.Routes) == 2
+	}, 10*time.Second)
+
+	resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+	require.NoError(t, err)
+	require.Len(t, resp.Routes, 2)
+}
+
+func TestLocalPrefDefault(t *testing.T) {
+	t.Log("Testing BGP LocalPref defaulting (0 -> 100)")
+	bgpPort, grpcPort := portPair(21)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	prefix := "7.7.7.0/24"
+	// Announce with LP 0 (defaults to 100)
+	announceIPv4WithAttributes(t, gobgp, "7.7.7.0", 24, "10.0.0.1", []uint32{100}, 0, 0)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+		return err == nil && resp.Found
+	}, 10*time.Second)
+
+	resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+	require.NoError(t, err)
+	require.True(t, resp.Found)
+	// Even though we sent 0, we verify it's treated as best or just that we see 0 but it's handled as 100 internally.
+	// Actually we should test it AGAINST something else.
+}
+
+func TestLocalPrefDefaultAgainstExplicit(t *testing.T) {
+	t.Log("Testing BGP LocalPref defaulting against explicit lower value")
+	bgpPort, grpcPort := portPair(22)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	// Use iBGP to ensure attributes are preserved
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	defer stopGoBGP1()
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false)
+	defer stopGoBGP2()
+
+	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
+	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
+
+	prefix := "7.8.0.0/16"
+	// Peer 1: No LP (0 -> 100)
+	announceIPv4WithAttributes(t, gobgp1, "7.8.0.0", 16, "10.0.0.1", []uint32{100}, 0, 0)
+	// Peer 2: Explicit LP 50
+	announceIPv4WithAttributes(t, gobgp2, "7.8.0.0", 16, "10.0.0.2", []uint32{200}, 0, 50)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: prefix})
+		return err == nil && len(resp.Routes) == 2
+	}, 10*time.Second)
+
+	// Best path should be Peer 1 (100 > 50)
+	resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+	require.NoError(t, err)
+	require.True(t, resp.Found)
+	// Stored as 0 (if GoBGP preserves it as absent) or 100 (if GoBGP defaults it). Both are acceptable as long as it's best.
+	require.True(t, resp.Route.LocalPref == 0 || resp.Route.LocalPref == 100)
+	require.Equal(t, uint32(100), resp.Route.AsPath[0]) // Verification it's Peer 1's route
+}
+
+func TestMidStreamConvergence(t *testing.T) {
+	t.Log("Testing Best Path convergence mid-stream")
+	bgpPort, grpcPort := portPair(23)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	prefix := "8.8.8.0"
+	// 1. Initial path (LP 50)
+	announceIPv4WithPathID(t, gobgp, prefix, 24, "10.0.0.1", []uint32{100}, 1)
+	// We need to set LP 50. Use WithAttributes
+	announceIPv4WithAttributes(t, gobgp, prefix, 24, "10.0.0.1", []uint32{100}, 1, 50)
+
+	// 2. Better path (LP 150) arrives
+	announceIPv4WithAttributes(t, gobgp, prefix, 24, "10.0.0.1", []uint32{200}, 2, 150)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+		if err != nil {
+			t.Logf("GetRoute error: %v", err)
+			return false
+		}
+		if !resp.Found {
+			t.Log("GetRoute: Found=false")
+			return false
+		}
+		t.Logf("GetRoute: Found=true, LP=%d, PathID=%d", resp.Route.LocalPref, resp.Route.PathId)
+		return resp.Route.LocalPref == 150
+	}, 20*time.Second)
+
+	resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix + "/24"})
+	require.NoError(t, err)
+	require.True(t, resp.Found)
+	require.Equal(t, uint32(150), resp.Route.LocalPref)
+}
+
+func TestBestPathFlipOnWithdrawal(t *testing.T) {
+	t.Log("Testing Best Path flip on withdrawal")
+	bgpPort, grpcPort := portPair(24)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	defer stopGoBGP1()
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false)
+	defer stopGoBGP2()
+
+	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
+	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
+
+	prefix := "9.9.9.0/24"
+	// Peer 1: LP 200 (Best)
+	announceIPv4WithAttributes(t, gobgp1, "9.9.9.0", 24, "10.0.0.1", []uint32{100}, 0, 200)
+	// Peer 2: LP 100 (Backup)
+	announceIPv4WithAttributes(t, gobgp2, "9.9.9.0", 24, "10.0.0.2", []uint32{200}, 0, 100)
+
+	client := grpcClient(t, grpcPort)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+		return err == nil && resp.Found && resp.Route.LocalPref == 200
+	}, 10*time.Second)
+
+	// Withdraw Peer 1's route
+	t.Log("Withdrawing Peer 1 route...")
+	withdrawIPv4(t, gobgp1, "9.9.9.0", 24)
+
+	// Should flip to Peer 2 (LP 100)
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+		if err != nil {
+			t.Logf("GetRoute error: %v", err)
+			return false
+		}
+		if !resp.Found {
+			t.Log("GetRoute: Found=false")
+			return false
+		}
+		t.Logf("GetRoute: Found=true, LP=%d, Peer=%s", resp.Route.LocalPref, resp.Route.PeerIp)
+		return resp.Route.LocalPref == 100
+	}, 20*time.Second)
+
+	resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix})
+	require.NoError(t, err)
+	require.True(t, resp.Found)
+	require.Equal(t, uint32(100), resp.Route.LocalPref)
+}
+

@@ -597,10 +597,19 @@ func (g *grpcServer) GetPrefixesByLargeCommunity(ctx context.Context, in *pb.Lar
 }
 
 func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
-	if curr.Attributes.LocalPref > best.Attributes.LocalPref {
+	lp1 := curr.Attributes.LocalPref
+	if lp1 == 0 {
+		lp1 = 100
+	}
+	lp2 := best.Attributes.LocalPref
+	if lp2 == 0 {
+		lp2 = 100
+	}
+
+	if lp1 > lp2 {
 		return true
 	}
-	if curr.Attributes.LocalPref < best.Attributes.LocalPref {
+	if lp1 < lp2 {
 		return false
 	}
 	if len(curr.Attributes.AsPath) < len(best.Attributes.AsPath) {

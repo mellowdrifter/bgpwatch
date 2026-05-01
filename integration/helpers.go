@@ -209,6 +209,27 @@ func withdrawIPv4(t *testing.T, s *gobgpserver.BgpServer,
 	require.NoError(t, err)
 }
 
+func withdrawIPv4WithPathID(t *testing.T, s *gobgpserver.BgpServer,
+	prefix string, maskLen uint32, pathID uint32) {
+
+	nlri, _ := anypb.New(&api.IPAddressPrefix{
+		Prefix:    prefix,
+		PrefixLen: maskLen,
+	})
+	origin, _ := anypb.New(&api.OriginAttribute{Origin: 0})
+	nh, _ := anypb.New(&api.NextHopAttribute{NextHop: "0.0.0.0"})
+
+	err := s.DeletePath(context.Background(), &api.DeletePathRequest{
+		Path: &api.Path{
+			Family:     &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:       nlri,
+			Pattrs:     []*anypb.Any{origin, nh},
+			Identifier: pathID,
+		},
+	})
+	require.NoError(t, err)
+}
+
 func announceIPv6(t *testing.T, s *gobgpserver.BgpServer,
 	prefix string, maskLen uint32, nextHops []string, asPath []uint32) {
 
