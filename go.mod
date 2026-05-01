@@ -7,7 +7,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/mellowdrifter/bogons v1.0.0
 	github.com/mellowdrifter/routing_table v0.0.0-00010101000000-000000000000
-	github.com/osrg/gobgp/v3 v3.32.0
+	github.com/osrg/gobgp/v3 v3.35.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.40.0
 	google.golang.org/grpc v1.80.0
