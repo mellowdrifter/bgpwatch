@@ -44,7 +44,7 @@ func (s *Server) listen(c Config) {
 						}
 
 						var sig unix.TCPMD5Sig
-						
+
 						// Cap password length at 80 bytes (TCP_MD5SIG_MAXKEYLEN)
 						key := peerConf.Password
 						if len(key) > 80 {

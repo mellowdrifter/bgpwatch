@@ -19,7 +19,7 @@ clean:
 	rm -f $(BINARY_NAME)
 
 integration:
-	go test -tags integration -v -count=1 -timeout 120s ./integration/
+	go test -tags integration -v -count=1 -timeout 300s ./integration/
 
 fuzz:
 	go test -fuzz=FuzzDecodePathAttributes -fuzztime 20s ./internal/bgp

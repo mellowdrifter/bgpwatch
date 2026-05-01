@@ -505,6 +505,96 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 		Routes: results,
 	}, nil
 }
+func (g *grpcServer) GetPrefixesByCommunity(ctx context.Context, in *pb.CommunityRequest) (*pb.RoutesResponse, error) {
+	if err := g.checkReady(); err != nil {
+		return nil, err
+	}
+
+	comm := in.GetCommunity()
+	if comm == 0 {
+		return nil, status.Error(codes.InvalidArgument, "community is required")
+	}
+
+	peers := g.snapshotPeers()
+	type candidate struct {
+		route  routing_table.Route
+		peerIP string
+	}
+	prefixToBest := make(map[netip.Prefix]candidate)
+
+	for _, p := range peers {
+		var all []routing_table.Route
+		if p.v4rib != nil {
+			all = p.v4rib.PrefixesByCommunity(comm)
+		}
+		if p.v6rib != nil {
+			all = append(all, p.v6rib.PrefixesByCommunity(comm)...)
+		}
+		for _, r := range all {
+			existing, ok := prefixToBest[r.Prefix]
+			if !ok || g.isBetter(r, existing.route) {
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+			}
+		}
+	}
+
+	results := make([]*pb.Route, 0, len(prefixToBest))
+	for _, c := range prefixToBest {
+		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+	}
+
+	return &pb.RoutesResponse{
+		Routes: results,
+	}, nil
+}
+
+func (g *grpcServer) GetPrefixesByLargeCommunity(ctx context.Context, in *pb.LargeCommunityRequest) (*pb.RoutesResponse, error) {
+	if err := g.checkReady(); err != nil {
+		return nil, err
+	}
+
+	pbLc := in.GetCommunity()
+	if pbLc == nil {
+		return nil, status.Error(codes.InvalidArgument, "large community is required")
+	}
+	lc := routing_table.LargeCommunity{
+		GlobalAdmin: pbLc.GlobalAdmin,
+		LocalData1:  pbLc.LocalData1,
+		LocalData2:  pbLc.LocalData2,
+	}
+
+	peers := g.snapshotPeers()
+	type candidate struct {
+		route  routing_table.Route
+		peerIP string
+	}
+	prefixToBest := make(map[netip.Prefix]candidate)
+
+	for _, p := range peers {
+		var all []routing_table.Route
+		if p.v4rib != nil {
+			all = p.v4rib.PrefixesByLargeCommunity(lc)
+		}
+		if p.v6rib != nil {
+			all = append(all, p.v6rib.PrefixesByLargeCommunity(lc)...)
+		}
+		for _, r := range all {
+			existing, ok := prefixToBest[r.Prefix]
+			if !ok || g.isBetter(r, existing.route) {
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+			}
+		}
+	}
+
+	results := make([]*pb.Route, 0, len(prefixToBest))
+	for _, c := range prefixToBest {
+		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+	}
+
+	return &pb.RoutesResponse{
+		Routes: results,
+	}, nil
+}
 
 func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
 	if curr.Attributes.LocalPref > best.Attributes.LocalPref {

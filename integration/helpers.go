@@ -44,6 +44,11 @@ func startBGPWatch(t *testing.T, bgpPort, grpcPort int, eor bool) func() {
 
 func startGoBGP(t *testing.T, localAS uint32, routerID, peerAddr string,
 	peerAS uint32, bgpPort int, addPath bool) (*gobgpserver.BgpServer, func()) {
+	return startGoBGPWithLocalAddr(t, localAS, routerID, peerAddr, "", peerAS, bgpPort, addPath)
+}
+
+func startGoBGPWithLocalAddr(t *testing.T, localAS uint32, routerID, peerAddr, localAddr string,
+	peerAS uint32, bgpPort int, addPath bool) (*gobgpserver.BgpServer, func()) {
 
 	s := gobgpserver.NewBgpServer()
 	go s.Serve()
@@ -63,7 +68,8 @@ func startGoBGP(t *testing.T, localAS uint32, routerID, peerAddr string,
 			PeerAsn:          peerAS,
 		},
 		Transport: &api.Transport{
-			RemotePort: uint32(bgpPort),
+			RemotePort:   uint32(bgpPort),
+			LocalAddress: localAddr,
 		},
 	}
 
@@ -148,6 +154,11 @@ func announceIPv4(t *testing.T, s *gobgpserver.BgpServer,
 
 func announceIPv4WithPathID(t *testing.T, s *gobgpserver.BgpServer,
 	prefix string, maskLen uint32, nextHop string, asPath []uint32, pathID uint32) {
+	announceIPv4WithAttributes(t, s, prefix, maskLen, nextHop, asPath, pathID, 0)
+}
+
+func announceIPv4WithAttributes(t *testing.T, s *gobgpserver.BgpServer,
+	prefix string, maskLen uint32, nextHop string, asPath []uint32, pathID uint32, localPref uint32) {
 
 	nlri, _ := anypb.New(&api.IPAddressPrefix{
 		Prefix:    prefix,
@@ -161,12 +172,18 @@ func announceIPv4WithPathID(t *testing.T, s *gobgpserver.BgpServer,
 	}
 	asp, _ := anypb.New(&api.AsPathAttribute{Segments: segments})
 
+	attrs := []*anypb.Any{origin, nh, asp}
+	if localPref > 0 {
+		lp, _ := anypb.New(&api.LocalPrefAttribute{LocalPref: localPref})
+		attrs = append(attrs, lp)
+	}
+
 	_, err := s.AddPath(context.Background(), &api.AddPathRequest{
 		Path: &api.Path{
-			Family:         &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
-			Nlri:           nlri,
-			Pattrs:         []*anypb.Any{origin, nh, asp},
-			Identifier:     pathID,
+			Family:     &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:       nlri,
+			Pattrs:     attrs,
+			Identifier: pathID,
 		},
 	})
 	require.NoError(t, err)
@@ -193,7 +210,7 @@ func withdrawIPv4(t *testing.T, s *gobgpserver.BgpServer,
 }
 
 func announceIPv6(t *testing.T, s *gobgpserver.BgpServer,
-	prefix string, maskLen uint32, nextHop string, asPath []uint32) {
+	prefix string, maskLen uint32, nextHops []string, asPath []uint32) {
 
 	family := &api.Family{Afi: api.Family_AFI_IP6, Safi: api.Family_SAFI_UNICAST}
 	nlri, _ := anypb.New(&api.IPAddressPrefix{
@@ -204,7 +221,7 @@ func announceIPv6(t *testing.T, s *gobgpserver.BgpServer,
 	
 	mpreach, _ := anypb.New(&api.MpReachNLRIAttribute{
 		Family:   family,
-		NextHops: []string{nextHop},
+		NextHops: nextHops,
 		Nlris:    []*anypb.Any{nlri},
 	})
 
@@ -233,4 +250,88 @@ func waitForConvergence(t *testing.T, check func() bool, timeout time.Duration) 
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("convergence check did not pass within timeout")
+}
+
+func announceIPv4WithCommunities(t *testing.T, s *gobgpserver.BgpServer,
+	prefix string, maskLen uint32, nextHop string, asPath []uint32, communities []uint32) {
+
+	nlri, _ := anypb.New(&api.IPAddressPrefix{
+		Prefix:    prefix,
+		PrefixLen: maskLen,
+	})
+	origin, _ := anypb.New(&api.OriginAttribute{Origin: 0})
+	nh, _ := anypb.New(&api.NextHopAttribute{NextHop: nextHop})
+
+	segments := []*api.AsSegment{
+		{Type: api.AsSegment_AS_SEQUENCE, Numbers: asPath},
+	}
+	asp, _ := anypb.New(&api.AsPathAttribute{Segments: segments})
+	comm, _ := anypb.New(&api.CommunitiesAttribute{Communities: communities})
+
+	_, err := s.AddPath(context.Background(), &api.AddPathRequest{
+		Path: &api.Path{
+			Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:   nlri,
+			Pattrs: []*anypb.Any{origin, nh, asp, comm},
+		},
+	})
+	require.NoError(t, err)
+}
+
+func announceIPv4WithLargeCommunities(t *testing.T, s *gobgpserver.BgpServer,
+	prefix string, maskLen uint32, nextHop string, asPath []uint32, largeCommunities []*api.LargeCommunity) {
+
+	nlri, _ := anypb.New(&api.IPAddressPrefix{
+		Prefix:    prefix,
+		PrefixLen: maskLen,
+	})
+	origin, _ := anypb.New(&api.OriginAttribute{Origin: 0})
+	nh, _ := anypb.New(&api.NextHopAttribute{NextHop: nextHop})
+
+	segments := []*api.AsSegment{
+		{Type: api.AsSegment_AS_SEQUENCE, Numbers: asPath},
+	}
+	asp, _ := anypb.New(&api.AsPathAttribute{Segments: segments})
+	lcomm, _ := anypb.New(&api.LargeCommunitiesAttribute{Communities: largeCommunities})
+
+	_, err := s.AddPath(context.Background(), &api.AddPathRequest{
+		Path: &api.Path{
+			Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:   nlri,
+			Pattrs: []*anypb.Any{origin, nh, asp, lcomm},
+		},
+	})
+	require.NoError(t, err)
+}
+
+func announceIPv4WithUnknownAttr(t *testing.T, s *gobgpserver.BgpServer,
+	prefix string, maskLen uint32, nextHop string) {
+
+	nlri, _ := anypb.New(&api.IPAddressPrefix{
+		Prefix:    prefix,
+		PrefixLen: maskLen,
+	})
+	origin, _ := anypb.New(&api.OriginAttribute{Origin: 0})
+	nh, _ := anypb.New(&api.NextHopAttribute{NextHop: nextHop})
+
+	segments := []*api.AsSegment{
+		{Type: api.AsSegment_AS_SEQUENCE, Numbers: []uint32{64500}},
+	}
+	asp, _ := anypb.New(&api.AsPathAttribute{Segments: segments})
+
+	// Add an unknown attribute (Type 99, flags: Optional+Transitive = 0xc0)
+	unknown, _ := anypb.New(&api.UnknownAttribute{
+		Flags: 0xc0,
+		Type:  99,
+		Value: []byte{0xde, 0xad, 0xbe, 0xef},
+	})
+
+	_, err := s.AddPath(context.Background(), &api.AddPathRequest{
+		Path: &api.Path{
+			Family: &api.Family{Afi: api.Family_AFI_IP, Safi: api.Family_SAFI_UNICAST},
+			Nlri:   nlri,
+			Pattrs: []*anypb.Any{origin, nh, asp, unknown},
+		},
+	})
+	require.NoError(t, err)
 }

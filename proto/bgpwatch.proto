@@ -36,6 +36,14 @@ message LargeCommunity {
   uint32 local_data2 = 3;
 }
 
+message CommunityRequest {
+  uint32 community = 1;
+}
+
+message LargeCommunityRequest {
+  LargeCommunity community = 1;
+}
+
 message Route {
   string prefix = 1;
   repeated uint32 as_path = 2;
@@ -119,4 +127,10 @@ service BGPWatch {
 
   // GetPrefixesByAsPath returns all IPv4 and IPv6 prefixes matching the given AS path regex.
   rpc GetPrefixesByAsPath(AsPathRequest) returns (RoutesResponse);
+
+  // GetPrefixesByCommunity returns all IPv4 and IPv6 routes matching the given community.
+  rpc GetPrefixesByCommunity(CommunityRequest) returns (RoutesResponse);
+
+  // GetPrefixesByLargeCommunity returns all IPv4 and IPv6 routes matching the given large community.
+  rpc GetPrefixesByLargeCommunity(LargeCommunityRequest) returns (RoutesResponse);
 }

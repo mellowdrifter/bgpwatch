@@ -12,8 +12,8 @@ const (
 	capabilities = 2
 
 	// capability codes I support
-	capMpBgp   uint8 = 1
-	cap4Byte   uint8 = 65
+	capMpBgp           uint8 = 1
+	cap4Byte           uint8 = 65
 	capExtendedMessage uint8 = 6
 	capAddPath         uint8 = 69
 	capRefresh         uint8 = 70 // Only support enhanced refresh
@@ -41,7 +41,6 @@ var capMap = map[uint8]string{
 	73:  "FQDN Capability",
 	128: "Route Refresh Capability (deprecated)",
 }
-
 
 type Parameters struct {
 	ASN32           [4]byte

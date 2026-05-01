@@ -113,10 +113,10 @@ type PrefixAttributes struct {
 	V6prefixes  []V6Addr
 	V4Withdraws []V4Addr
 	V6Withdraws []V6Addr
-	V4NextHop  string
-	V6NextHops []string
-	V4EoR      bool
-	V6EoR      bool
+	V4NextHop   string
+	V6NextHops  []string
+	V4EoR       bool
+	V6EoR       bool
 }
 
 type V4Addr struct {
