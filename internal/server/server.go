@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/mellowdrifter/bgpwatch/internal/bgp"
 	"github.com/mellowdrifter/bgpwatch/internal/procstats"
+	"github.com/mellowdrifter/routing_table"
+	"google.golang.org/grpc"
 )
 
 type Server struct {
@@ -26,6 +29,8 @@ type Server struct {
 	v6PrefixRefs  map[netip.Prefix]uint16
 	sampler       *procstats.Sampler
 	Conf          Config
+	grManager     GracefulRestartManager
+	grpcServer    *grpc.Server
 }
 
 type Config struct {
@@ -39,10 +44,12 @@ type Config struct {
 	IgnoreCommunities bool
 	PeersConfig       map[string]PeerConfig
 	Asn               uint32
+	GRRestartTime     time.Duration
+	GREoRFallbackTime time.Duration
 }
 
 func New(conf Config) *Server {
-	return &Server{
+	s := &Server{
 		mutex:        sync.RWMutex{},
 		v4Masks:      make(map[int32]int32),
 		v6Masks:      make(map[int32]int32),
@@ -51,16 +58,21 @@ func New(conf Config) *Server {
 		sampler:      procstats.NewSampler(30 * time.Second),
 		Conf:         conf,
 	}
+	s.grManager = NewGracefulRestartManager(s)
+	return s
 }
 
 func (s *Server) Start() {
 	s.listen(s.Conf)
 	go s.clean()
-	go s.startGRPC(s.Conf.GrpcPort)
+	s.grpcServer = s.startGRPC(s.Conf.GrpcPort)
 
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("%v\n", err)
 		} else {
 			peer := s.accept(conn)
@@ -69,6 +81,25 @@ func (s *Server) Start() {
 			}
 		}
 	}
+}
+
+func (s *Server) Stop() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.listener != nil {
+		s.listener.Close()
+	}
+	if s.grpcServer != nil {
+		s.grpcServer.Stop()
+	}
+
+	for _, p := range s.peers {
+		if p.conn != nil {
+			p.conn.Close()
+		}
+	}
+	s.peers = nil
 }
 
 // GetRid converts the string RID to actual BGPID.
@@ -135,9 +166,38 @@ func (s *Server) accept(conn net.Conn) *peer {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	var oldV4Rib *routing_table.IPv4Rib
+	var oldV6Rib *routing_table.IPv6Rib
+	var oldStatus uint32
+	var oldStaleSince time.Time
+
 	// If new client trying to connect with existing connection, remove old peer from pool
 	for i, check := range s.peers {
 		if ip == check.ip {
+			check.mutex.Lock()
+			oldV4Rib = check.v4rib
+			oldV6Rib = check.v6rib
+			oldStatus = check.status.Load()
+			oldStaleSince = check.staleSince
+			isGR := check.param.GracefulRestart
+			check.v4rib = nil
+			check.v6rib = nil
+			check.mutex.Unlock()
+
+			// If old peer had GR enabled and wasn't already stale,
+			// mark the stolen RIBs as stale now (since old peer's remove()
+			// won't do it — it will see the peer is no longer in the list).
+			if isGR && PeerStatus(oldStatus) == StatusEstablished {
+				if oldV4Rib != nil {
+					oldV4Rib.MarkAllStale()
+				}
+				if oldV6Rib != nil {
+					oldV6Rib.MarkAllStale()
+				}
+				oldStatus = uint32(StatusGRStale)
+				oldStaleSince = time.Now()
+			}
+
 			check.conn.Close()
 			s.peers = append(s.peers[:i], s.peers[i+1:]...)
 			break
@@ -153,7 +213,11 @@ func (s *Server) accept(conn net.Conn) *peer {
 		ip:        ip,
 		mutex:     sync.RWMutex{},
 		startTime: time.Now(),
+		v4rib:     oldV4Rib,
+		v6rib:     oldV6Rib,
 	}
+	peer.status.Store(oldStatus)
+	peer.staleSince = oldStaleSince
 
 	s.peers = append(s.peers, peer)
 	peerIPs := make([]string, len(s.peers))
@@ -167,6 +231,45 @@ func (s *Server) accept(conn net.Conn) *peer {
 
 // remove removes a client from the current list of clients being served.
 func (s *Server) remove(p *peer) {
+	p.conn.Close()
+
+	p.mutex.RLock()
+	isGR := p.param.GracefulRestart
+	p.mutex.RUnlock()
+
+	if isGR {
+		// Check if this peer is still in the peers list.
+		// If it was already replaced by accept() during reconnection,
+		// the new peer's HandleOpen will handle the GR transition.
+		s.mutex.RLock()
+		stillActive := false
+		for _, check := range s.peers {
+			if check == p {
+				stillActive = true
+				break
+			}
+		}
+		s.mutex.RUnlock()
+
+		if stillActive {
+			log.Printf("Peer %s disconnected, holding routes (Graceful Restart)\n", p.ip)
+			if p.v4rib != nil {
+				p.v4rib.MarkAllStale()
+			}
+			if p.v6rib != nil {
+				p.v6rib.MarkAllStale()
+			}
+			p.mutex.Lock()
+			p.staleSince = time.Now()
+			p.mutex.Unlock()
+			_ = s.grManager.HandlePeerDown(context.Background(), p.ip)
+			return
+		}
+		// Peer was replaced — the new peer has the RIBs, do nothing
+		log.Printf("Old peer %s was already replaced, skipping GR handling\n", p.ip)
+		return
+	}
+
 	log.Printf("Removing dead peer %s\n", p.conn.RemoteAddr().String())
 
 	s.mutex.Lock()
@@ -177,8 +280,6 @@ func (s *Server) remove(p *peer) {
 		}
 	}
 	s.mutex.Unlock()
-
-	p.conn.Close()
 
 	// Clean up global refs and peer's memory
 	p.mutex.Lock()

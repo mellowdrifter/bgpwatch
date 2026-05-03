@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/netip"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/bgp"
@@ -43,9 +45,13 @@ type peer struct {
 	startTime       time.Time
 	establishedTime time.Time
 	in              *bytes.Reader
-	prefixes        *bgp.PrefixAttributes
-	v4rib           *routing_table.IPv4Rib
-	v6rib           *routing_table.IPv6Rib
+	prefixes         *bgp.PrefixAttributes
+	v4rib            *routing_table.IPv4Rib
+	v6rib            *routing_table.IPv6Rib
+	status           atomic.Uint32
+	staleSince       time.Time
+	restartTimer     *time.Timer
+	eorFallbackTimer *time.Timer
 }
 
 func (p *peer) peerWorker() {
@@ -241,6 +247,18 @@ func (p *peer) HandleOpen() error {
 	}
 	if v6 && p.v6rib == nil {
 		p.v6rib = routing_table.NewIPv6Rib()
+	}
+
+	currentStatus := PeerStatus(p.status.Load())
+	if currentStatus == StatusGRStale || currentStatus == StatusWaitingForEOR {
+		// Transition to WaitingForEOR immediately so the EoR handler
+		// will trigger the purge even if ProcessCapExchange hasn't run yet.
+		p.status.Store(uint32(StatusWaitingForEOR))
+		go func() {
+			if err := p.server.grManager.ProcessCapExchange(context.Background(), p.ip, p.param); err != nil {
+				log.Printf("GR ProcessCapExchange error for %s: %v", p.ip, err)
+			}
+		}()
 	}
 
 	return nil
@@ -556,6 +574,25 @@ func (p *peer) processRibUpdates() {
 		}
 		log.Printf("Peer %s sent EoR. Routes: %d IPv4, %d IPv6",
 			p.ip, v4c, v6c)
+
+		// Notify GR manager that EoR has been received
+		currentStatus := PeerStatus(p.status.Load())
+		if currentStatus == StatusWaitingForEOR {
+			if prefixes.V4EoR {
+				go func() {
+					if err := p.server.grManager.ReceiveEoR(context.Background(), p.ip, Family{AFI: 1, SAFI: 1}); err != nil {
+						log.Printf("GR V4 EoR cleanup error for %s: %v", p.ip, err)
+					}
+				}()
+			}
+			if prefixes.V6EoR {
+				go func() {
+					if err := p.server.grManager.ReceiveEoR(context.Background(), p.ip, Family{AFI: 2, SAFI: 1}); err != nil {
+						log.Printf("GR V6 EoR cleanup error for %s: %v", p.ip, err)
+					}
+				}()
+			}
+		}
 
 		go func() {
 			time.Sleep(15 * time.Second)

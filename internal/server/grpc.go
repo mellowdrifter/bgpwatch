@@ -149,6 +149,7 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			RibRamBytes:                peerRam,
 			AddPath:                    len(p.param.AddPath) > 0,
 			UniqueAttributes:           attrCount,
+			GracefulRestart:            p.param.GracefulRestart,
 		}
 		p.mutex.RUnlock()
 	}
@@ -183,6 +184,7 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 	peers := g.snapshotPeers()
 	var candidates []routing_table.Route
 	var peerIPs []string
+	var staleTimes []time.Time
 
 	for _, p := range peers {
 		r, err := g.performLookup(p, addr)
@@ -192,6 +194,9 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 		if r != nil {
 			candidates = append(candidates, *r)
 			peerIPs = append(peerIPs, anonymizePeer(p.ip))
+			p.mutex.RLock()
+			staleTimes = append(staleTimes, p.staleSince)
+			p.mutex.RUnlock()
 		}
 	}
 
@@ -209,13 +214,17 @@ func (g *grpcServer) GetRoute(ctx context.Context, in *pb.RouteRequest) (*pb.Rou
 
 	return &pb.RouteLookupResponse{
 		Found: true,
-		Route: formatRouteResponse(&candidates[bestIdx], peerIPs[bestIdx]),
+		Route: formatRouteResponse(&candidates[bestIdx], peerIPs[bestIdx], staleTimes[bestIdx]),
 	}, nil
 }
 
-func formatRouteResponse(r *routing_table.Route, peerIP string) *pb.Route {
+func formatRouteResponse(r *routing_table.Route, peerIP string, staleSince time.Time) *pb.Route {
 	if r == nil {
 		return nil
+	}
+	var staleSeconds uint64
+	if r.Stale && !staleSince.IsZero() {
+		staleSeconds = uint64(time.Since(staleSince).Seconds())
 	}
 	return &pb.Route{
 		Prefix:           r.Prefix.String(),
@@ -225,6 +234,7 @@ func formatRouteResponse(r *routing_table.Route, peerIP string) *pb.Route {
 		Communities:      formatRouteCommunities(r.Attributes.Communities),
 		LargeCommunities: formatRouteLargeCommunities(r.Attributes.LargeCommunities),
 		PathId:           r.PathID,
+		StaleSeconds:     staleSeconds,
 	}
 }
 
@@ -248,8 +258,12 @@ func (g *grpcServer) GetRoutes(ctx context.Context, in *pb.RouteRequest) (*pb.Ro
 			continue
 		}
 
+		p.mutex.RLock()
+		stSince := p.staleSince
+		p.mutex.RUnlock()
+
 		for _, r := range routes {
-			results = append(results, formatRouteResponse(&r, anonymizePeer(p.ip)))
+			results = append(results, formatRouteResponse(&r, anonymizePeer(p.ip), stSince))
 		}
 	}
 
@@ -426,8 +440,9 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 
 	peers := g.snapshotPeers()
 	type candidate struct {
-		route  routing_table.Route
-		peerIP string
+		route      routing_table.Route
+		peerIP     string
+		staleSince time.Time
 	}
 	prefixToBest := make(map[netip.Prefix]candidate)
 
@@ -439,17 +454,20 @@ func (g *grpcServer) GetRoutesByOrigin(ctx context.Context, in *pb.OriginRequest
 		if p.v6rib != nil {
 			all = append(all, p.v6rib.PrefixesByOriginASN(asn)...)
 		}
+		p.mutex.RLock()
+		stSince := p.staleSince
+		p.mutex.RUnlock()
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {
-				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip), staleSince: stSince}
 			}
 		}
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
 	for _, c := range prefixToBest {
-		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+		results = append(results, formatRouteResponse(&c.route, c.peerIP, c.staleSince))
 	}
 
 	return &pb.RoutesResponse{
@@ -475,8 +493,9 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 
 	peers := g.snapshotPeers()
 	type candidate struct {
-		route  routing_table.Route
-		peerIP string
+		route      routing_table.Route
+		peerIP     string
+		staleSince time.Time
 	}
 	prefixToBest := make(map[netip.Prefix]candidate)
 
@@ -488,17 +507,20 @@ func (g *grpcServer) GetPrefixesByAsPath(ctx context.Context, in *pb.AsPathReque
 		if p.v6rib != nil {
 			all = append(all, p.v6rib.PrefixesByAsPathRegex(re)...)
 		}
+		p.mutex.RLock()
+		stSince := p.staleSince
+		p.mutex.RUnlock()
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {
-				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip), staleSince: stSince}
 			}
 		}
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
 	for _, c := range prefixToBest {
-		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+		results = append(results, formatRouteResponse(&c.route, c.peerIP, c.staleSince))
 	}
 
 	return &pb.RoutesResponse{
@@ -517,8 +539,9 @@ func (g *grpcServer) GetPrefixesByCommunity(ctx context.Context, in *pb.Communit
 
 	peers := g.snapshotPeers()
 	type candidate struct {
-		route  routing_table.Route
-		peerIP string
+		route      routing_table.Route
+		peerIP     string
+		staleSince time.Time
 	}
 	prefixToBest := make(map[netip.Prefix]candidate)
 
@@ -530,17 +553,20 @@ func (g *grpcServer) GetPrefixesByCommunity(ctx context.Context, in *pb.Communit
 		if p.v6rib != nil {
 			all = append(all, p.v6rib.PrefixesByCommunity(comm)...)
 		}
+		p.mutex.RLock()
+		stSince := p.staleSince
+		p.mutex.RUnlock()
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {
-				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip), staleSince: stSince}
 			}
 		}
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
 	for _, c := range prefixToBest {
-		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+		results = append(results, formatRouteResponse(&c.route, c.peerIP, c.staleSince))
 	}
 
 	return &pb.RoutesResponse{
@@ -565,8 +591,9 @@ func (g *grpcServer) GetPrefixesByLargeCommunity(ctx context.Context, in *pb.Lar
 
 	peers := g.snapshotPeers()
 	type candidate struct {
-		route  routing_table.Route
-		peerIP string
+		route      routing_table.Route
+		peerIP     string
+		staleSince time.Time
 	}
 	prefixToBest := make(map[netip.Prefix]candidate)
 
@@ -578,17 +605,20 @@ func (g *grpcServer) GetPrefixesByLargeCommunity(ctx context.Context, in *pb.Lar
 		if p.v6rib != nil {
 			all = append(all, p.v6rib.PrefixesByLargeCommunity(lc)...)
 		}
+		p.mutex.RLock()
+		stSince := p.staleSince
+		p.mutex.RUnlock()
 		for _, r := range all {
 			existing, ok := prefixToBest[r.Prefix]
 			if !ok || g.isBetter(r, existing.route) {
-				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip)}
+				prefixToBest[r.Prefix] = candidate{route: r, peerIP: anonymizePeer(p.ip), staleSince: stSince}
 			}
 		}
 	}
 
 	results := make([]*pb.Route, 0, len(prefixToBest))
 	for _, c := range prefixToBest {
-		results = append(results, formatRouteResponse(&c.route, c.peerIP))
+		results = append(results, formatRouteResponse(&c.route, c.peerIP, c.staleSince))
 	}
 
 	return &pb.RoutesResponse{
@@ -630,7 +660,7 @@ func ciscoRegexpToGo(cisco string) string {
 	return strings.ReplaceAll(cisco, "_", "(?:^| +|$)")
 }
 
-func (s *Server) startGRPC(port int) {
+func (s *Server) startGRPC(port int) *grpc.Server {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Fatalf("failed to listen for gRPC: %v", err)
@@ -658,7 +688,11 @@ func (s *Server) startGRPC(port int) {
 	}
 
 	log.Printf("gRPC server listening on port %d\n", port)
-	if err := srv.Serve(lis); err != nil {
-		log.Fatalf("gRPC server failed: %v", err)
-	}
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			log.Printf("gRPC server failed: %v\n", err)
+		}
+	}()
+
+	return srv
 }

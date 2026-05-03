@@ -21,6 +21,9 @@ clean:
 integration:
 	go test -tags integration -v -count=1 -timeout 300s ./integration/
 
+integration-gr:
+	go test -tags integration -v -count=1 -timeout 300s ./integration/ -run TestGracefulRestart
+
 fuzz:
 	go test -fuzz=FuzzDecodePathAttributes -fuzztime 20s ./internal/bgp
 	go test -fuzz=FuzzDecodeIPv4Withdraws -fuzztime 20s ./internal/bgp

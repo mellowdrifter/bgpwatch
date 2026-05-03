@@ -46,6 +46,7 @@ type Parameters struct {
 	ASN32           [4]byte
 	Refresh         bool
 	GracefulRestart bool
+	GRCapability    *GracefulRestartCapability
 	ExtendedMessage bool
 	AddPath         []AddPathCapability
 	AddrFamilies    []Addr
@@ -63,6 +64,18 @@ type AddPathCapability struct {
 	AFI         uint16
 	SAFI        uint8
 	SendReceive uint8 // 1 = receive, 2 = send, 3 = both
+}
+
+type GracefulRestartCapability struct {
+	RestartFlags uint8
+	RestartTime  uint16
+	AFIs         []GRAddressFamily
+}
+
+type GRAddressFamily struct {
+	AFI   uint16
+	SAFI  uint8
+	Flags uint8
 }
 
 type parameterHeader struct {
@@ -170,6 +183,20 @@ func decodeCapability(cap []byte, p *Parameters) error {
 				p.AddPath = append(p.AddPath, a)
 			}
 			p.Supported = append(p.Supported, msgCap.Code)
+
+		case capGracefulRestart:
+			log.Printf("%s supported", capMap[msgCap.Code])
+			p.GracefulRestart = true
+			if _, err := io.CopyN(buf, r, int64(msgCap.Length)); err != nil {
+				return err
+			}
+			gr, err := decodeGracefulRestart(buf)
+			if err != nil {
+				return err
+			}
+			p.GRCapability = &gr
+			p.Supported = append(p.Supported, msgCap.Code)
+
 		default:
 			if desc, ok := capMap[msgCap.Code]; ok {
 				log.Printf("%s is not supported", desc)
@@ -207,4 +234,35 @@ func decodeAddPath(b *bytes.Buffer) (AddPathCapability, error) {
 		return a, err
 	}
 	return a, nil
+}
+
+func decodeGracefulRestart(b *bytes.Buffer) (GracefulRestartCapability, error) {
+	var gr GracefulRestartCapability
+	var firstTwo [2]byte
+	if err := binary.Read(b, binary.BigEndian, &firstTwo); err != nil {
+		return gr, err
+	}
+	gr.RestartFlags = firstTwo[0] >> 4
+	gr.RestartTime = uint16(firstTwo[0]&0x0F)<<8 | uint16(firstTwo[1])
+
+	for b.Len() > 0 {
+		var afi uint16
+		if err := binary.Read(b, binary.BigEndian, &afi); err != nil {
+			return gr, err
+		}
+		var safi uint8
+		if err := binary.Read(b, binary.BigEndian, &safi); err != nil {
+			return gr, err
+		}
+		var flags uint8
+		if err := binary.Read(b, binary.BigEndian, &flags); err != nil {
+			return gr, err
+		}
+		gr.AFIs = append(gr.AFIs, GRAddressFamily{
+			AFI:   afi,
+			SAFI:  safi,
+			Flags: flags,
+		})
+	}
+	return gr, nil
 }

@@ -52,6 +52,7 @@ message Route {
   repeated LargeCommunity large_communities = 5;
   string peer_ip = 6;
   uint32 path_id = 7;
+  uint64 stale_seconds = 8;
 }
 
 message RouteLookupResponse {
@@ -78,6 +79,7 @@ message PeerStats {
   uint64 rib_ram_bytes = 4;
   bool add_path = 5;
   uint64 unique_attributes = 6;
+  bool graceful_restart = 7;
 }
 
 message SystemStatsResponse {

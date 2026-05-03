@@ -31,7 +31,7 @@ func TestSessionEstablishes(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -50,7 +50,7 @@ func TestAnnounceAndGetTotals(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -78,7 +78,7 @@ func TestAnnounceAndLookup(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -113,7 +113,7 @@ func TestWithdrawal(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -141,7 +141,7 @@ func TestGetMasks(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -164,7 +164,7 @@ func TestEoRBlocking(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, true) // eor=true
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, true)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -187,7 +187,7 @@ func TestAddPathDetailed(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -222,7 +222,7 @@ func TestIPv6Detailed(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -258,7 +258,7 @@ func TestOriginSearch(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -284,7 +284,7 @@ func TestAsPathRegexRealistic(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -328,7 +328,7 @@ func TestIBGPSession(t *testing.T) {
 	defer stopBW()
 
 	// Same AS for iBGP
-	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -355,11 +355,11 @@ func TestMultiplePeersLocalPref(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP1()
 	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
 
-	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false)
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false, false)
 	defer stopGoBGP2()
 	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
 
@@ -396,7 +396,7 @@ func TestCommunitySearch(t *testing.T) {
 	stop := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stop()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -439,7 +439,7 @@ func TestUnknownAttributes(t *testing.T) {
 	stop := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stop()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -464,7 +464,7 @@ func TestPeerFlapRIB(t *testing.T) {
 	defer stop()
 
 	// 1. First session
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
 
 	client := grpcClient(t, grpcPort)
@@ -487,7 +487,7 @@ func TestPeerFlapRIB(t *testing.T) {
 	}, 10*time.Second)
 
 	// 3. Second session
-	gobgp2, stopGoBGP2 := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp2, stopGoBGP2 := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP2()
 	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
 
@@ -506,7 +506,7 @@ func TestFullTablePerformance(t *testing.T) {
 	stop := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stop()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -542,7 +542,7 @@ func TestAddPathZeroID(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -566,7 +566,7 @@ func TestAddPathImplicitWithdrawal(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -596,7 +596,7 @@ func TestAddPathPartialWithdrawal(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -633,7 +633,7 @@ func TestAddPathUnknownWithdrawal(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -665,12 +665,12 @@ func TestMultiPeerOverlappingPathIDs(t *testing.T) {
 	defer stopBW()
 
 	// Peer 1
-	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64500, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64500, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP1()
 	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
 
 	// Peer 2
-	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64501, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, true)
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64501, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, true, false)
 	defer stopGoBGP2()
 	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
 
@@ -696,7 +696,7 @@ func TestLocalPrefDefault(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -725,9 +725,9 @@ func TestLocalPrefDefaultAgainstExplicit(t *testing.T) {
 	defer stopBW()
 
 	// Use iBGP to ensure attributes are preserved
-	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP1()
-	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false)
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false, false)
 	defer stopGoBGP2()
 
 	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)
@@ -760,7 +760,7 @@ func TestMidStreamConvergence(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true)
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, true, false)
 	defer stopGoBGP()
 
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
@@ -801,9 +801,9 @@ func TestBestPathFlipOnWithdrawal(t *testing.T) {
 	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
 	defer stopBW()
 
-	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false)
+	gobgp1, stopGoBGP1 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.1", "127.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
 	defer stopGoBGP1()
-	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false)
+	gobgp2, stopGoBGP2 := startGoBGPWithLocalAddr(t, 64533, "10.0.0.2", "127.0.0.1", "127.0.0.2", 64533, bgpPort, false, false)
 	defer stopGoBGP2()
 
 	waitForSession(t, gobgp1, "127.0.0.1", 10*time.Second)

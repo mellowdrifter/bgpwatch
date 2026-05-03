@@ -6,16 +6,16 @@ package integration
 import (
 	"context"
 	"fmt"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/server"
 	pb "github.com/mellowdrifter/bgpwatch/proto"
 	api "github.com/osrg/gobgp/v3/api"
 	gobgpserver "github.com/osrg/gobgp/v3/pkg/server"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/anypb"
-	"github.com/stretchr/testify/require"
 )
 
 func startBGPWatch(t *testing.T, bgpPort, grpcPort int, eor bool) func() {
@@ -32,23 +32,22 @@ func startBGPWatch(t *testing.T, bgpPort, grpcPort int, eor bool) func() {
 	}
 	srv := server.New(conf)
 	go srv.Start()
-	
+
 	// Wait a bit for servers to start
 	time.Sleep(500 * time.Millisecond)
-	
+
 	return func() {
-		// No graceful shutdown in bgpwatch yet, but we can close the listener if it were exposed.
-		// For now, we rely on the test process exiting.
+		srv.Stop()
 	}
 }
 
 func startGoBGP(t *testing.T, localAS uint32, routerID, peerAddr string,
-	peerAS uint32, bgpPort int, addPath bool) (*gobgpserver.BgpServer, func()) {
-	return startGoBGPWithLocalAddr(t, localAS, routerID, peerAddr, "", peerAS, bgpPort, addPath)
+	peerAS uint32, bgpPort int, addPath bool, gr bool) (*gobgpserver.BgpServer, func()) {
+	return startGoBGPWithLocalAddr(t, localAS, routerID, peerAddr, "", peerAS, bgpPort, addPath, gr)
 }
 
 func startGoBGPWithLocalAddr(t *testing.T, localAS uint32, routerID, peerAddr, localAddr string,
-	peerAS uint32, bgpPort int, addPath bool) (*gobgpserver.BgpServer, func()) {
+	peerAS uint32, bgpPort int, addPath bool, gr bool) (*gobgpserver.BgpServer, func()) {
 
 	s := gobgpserver.NewBgpServer()
 	go s.Serve()
@@ -65,7 +64,7 @@ func startGoBGPWithLocalAddr(t *testing.T, localAS uint32, routerID, peerAddr, l
 	peer := &api.Peer{
 		Conf: &api.PeerConf{
 			NeighborAddress: peerAddr,
-			PeerAsn:          peerAS,
+			PeerAsn:         peerAS,
 		},
 		Transport: &api.Transport{
 			RemotePort:   uint32(bgpPort),
@@ -75,7 +74,7 @@ func startGoBGPWithLocalAddr(t *testing.T, localAS uint32, routerID, peerAddr, l
 
 	// Enable Graceful Restart to ensure EoR is sent
 	peer.GracefulRestart = &api.GracefulRestart{
-		Enabled: true,
+		Enabled: gr,
 	}
 
 	// Enable Add-Path if requested
@@ -135,7 +134,7 @@ func waitForSession(t *testing.T, s *gobgpserver.BgpServer, peerAddr string, tim
 func grpcClient(t *testing.T, grpcPort int) pb.BGPWatchClient {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	conn, err := grpc.DialContext(
 		ctx,
 		fmt.Sprintf("127.0.0.1:%d", grpcPort),
@@ -239,7 +238,7 @@ func announceIPv6(t *testing.T, s *gobgpserver.BgpServer,
 		PrefixLen: maskLen,
 	})
 	origin, _ := anypb.New(&api.OriginAttribute{Origin: 0})
-	
+
 	mpreach, _ := anypb.New(&api.MpReachNLRIAttribute{
 		Family:   family,
 		NextHops: nextHops,
