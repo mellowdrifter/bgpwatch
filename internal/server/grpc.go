@@ -95,7 +95,7 @@ func (g *grpcServer) checkReady() error {
 	for _, p := range peers {
 		p.mutex.RLock()
 		wantEor := p.weor
-		gotEor := p.eor
+		gotEor := p.v4eor || p.v6eor
 		peerIP := p.ip
 		p.mutex.RUnlock()
 
@@ -150,6 +150,8 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			AddPath:                    len(p.param.AddPath) > 0,
 			UniqueAttributes:           attrCount,
 			GracefulRestart:            p.param.GracefulRestart,
+			Ipv4Eor:                    p.v4eor,
+			Ipv6Eor:                    p.v6eor,
 		}
 		p.mutex.RUnlock()
 	}

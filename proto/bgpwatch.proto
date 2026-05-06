@@ -80,6 +80,8 @@ message PeerStats {
   bool add_path = 5;
   uint64 unique_attributes = 6;
   bool graceful_restart = 7;
+  bool ipv4_eor = 8;
+  bool ipv6_eor = 9;
 }
 
 message SystemStatsResponse {

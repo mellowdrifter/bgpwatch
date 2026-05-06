@@ -27,6 +27,8 @@ type Server struct {
 	v6Masks       map[int32]int32
 	v4PrefixRefs  map[netip.Prefix]uint16
 	v6PrefixRefs  map[netip.Prefix]uint16
+	v4AttrTable   *routing_table.AttrTable
+	v6AttrTable   *routing_table.AttrTable
 	sampler       *procstats.Sampler
 	Conf          Config
 	grManager     GracefulRestartManager
@@ -55,6 +57,8 @@ func New(conf Config) *Server {
 		v6Masks:      make(map[int32]int32),
 		v4PrefixRefs: make(map[netip.Prefix]uint16),
 		v6PrefixRefs: make(map[netip.Prefix]uint16),
+		v4AttrTable:  routing_table.NewAttrTable(),
+		v6AttrTable:  routing_table.NewAttrTable(),
 		sampler:      procstats.NewSampler(30 * time.Second),
 		Conf:         conf,
 	}

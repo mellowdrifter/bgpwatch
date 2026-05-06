@@ -33,7 +33,7 @@ type GracefulRestartManager interface {
 	HandlePeerDown(ctx context.Context, peerIP string) error
 	ProcessCapExchange(ctx context.Context, peerIP string, params bgp.Parameters) error
 	ReceiveEoR(ctx context.Context, peerIP string, family Family) error
-	StaleTimerExpired(ctx context.Context, peerIP string) error
+	CompleteGracefulRestart(ctx context.Context, peerIP string) error
 }
 
 type defaultGRManager struct {
@@ -114,7 +114,7 @@ func (m *defaultGRManager) ProcessCapExchange(ctx context.Context, peerIP string
 		if PeerStatus(p.status.Load()) == StatusWaitingForEOR {
 			p.status.Store(uint32(StatusPurgingRemainingStale))
 			log.Printf("EoR fallback timer expired for peer %s", peerIP)
-			_ = m.StaleTimerExpired(context.Background(), peerIP)
+			_ = m.CompleteGracefulRestart(context.Background(), peerIP)
 		}
 	})
 	p.mutex.Unlock()
@@ -159,7 +159,7 @@ func (m *defaultGRManager) ReceiveEoR(ctx context.Context, peerIP string, family
 
 	if allReceived {
 		log.Printf("All EoRs received for peer %s, triggering purge", peerIP)
-		return m.StaleTimerExpired(ctx, peerIP)
+		return m.CompleteGracefulRestart(ctx, peerIP)
 	}
 
 	log.Printf("Received EoR for peer %s family %+v, still waiting for others", peerIP, family)
@@ -186,7 +186,7 @@ func (m *defaultGRManager) HandlePeerDown(ctx context.Context, peerIP string) er
 		if PeerStatus(p.status.Load()) == StatusGRStale {
 			p.status.Store(uint32(StatusPurging))
 			log.Printf("Restart timer expired for peer %s, purging stale routes", peerIP)
-			_ = m.StaleTimerExpired(context.Background(), peerIP)
+			_ = m.CompleteGracefulRestart(context.Background(), peerIP)
 		}
 	})
 	p.mutex.Unlock()
@@ -195,7 +195,7 @@ func (m *defaultGRManager) HandlePeerDown(ctx context.Context, peerIP string) er
 	return nil
 }
 
-func (m *defaultGRManager) StaleTimerExpired(ctx context.Context, peerIP string) error {
+func (m *defaultGRManager) CompleteGracefulRestart(ctx context.Context, peerIP string) error {
 	p, ok := m.getPeer(peerIP)
 	if !ok {
 		return fmt.Errorf("peer not found: %s", peerIP)
@@ -216,7 +216,6 @@ func (m *defaultGRManager) StaleTimerExpired(ctx context.Context, peerIP string)
 	delete(m.eorReceived, peerIP)
 	m.mu.Unlock()
 
-	log.Printf("Stale timer expired for peer %s, purging remaining stale routes", peerIP)
 	return m.purgeAllStalePaths(ctx, p)
 }
 

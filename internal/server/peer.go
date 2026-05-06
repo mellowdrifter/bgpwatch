@@ -32,7 +32,8 @@ type peer struct {
 	holdtime        uint16
 	ip              string
 	conn            net.Conn
-	eor             bool
+	v4eor           bool
+	v6eor           bool
 	weor            bool
 	quiet           bool
 	mutex           sync.RWMutex
@@ -243,10 +244,10 @@ func (p *peer) HandleOpen() error {
 	}
 
 	if v4 && p.v4rib == nil {
-		p.v4rib = routing_table.NewIPv4Rib()
+		p.v4rib = routing_table.NewIPv4Rib(p.server.v4AttrTable)
 	}
 	if v6 && p.v6rib == nil {
-		p.v6rib = routing_table.NewIPv6Rib()
+		p.v6rib = routing_table.NewIPv6Rib(p.server.v6AttrTable)
 	}
 
 	currentStatus := PeerStatus(p.status.Load())
@@ -315,7 +316,7 @@ func (p *peer) handleUpdate() error {
 
 	if withdraw == 0 && attrLength == 0 {
 		p.mutex.Lock()
-		p.eor = true
+		p.v4eor = true
 		pa.V4EoR = true
 		p.prefixes = &pa
 		p.mutex.Unlock()
@@ -359,8 +360,11 @@ func (p *peer) handleUpdate() error {
 	}
 
 	p.mutex.Lock()
-	if pa.V4EoR || pa.V6EoR {
-		p.eor = true
+	if pa.V4EoR {
+		p.v4eor = true
+	}
+	if pa.V6EoR {
+		p.v6eor = true
 	}
 	p.prefixes = &pa
 	p.mutex.Unlock()
@@ -370,7 +374,7 @@ func (p *peer) handleUpdate() error {
 }
 
 func (p *peer) logUpdate() {
-	if p.weor && !p.eor {
+	if p.weor && !(p.v4eor || p.v6eor) {
 		p.mutex.Lock()
 		p.prefixes = nil
 		p.mutex.Unlock()
@@ -435,11 +439,11 @@ func (p *peer) logUpdate() {
 
 	if p.prefixes.V4EoR {
 		log.Printf("IPv4 End-of-Rib received from %s", p.ip)
-		p.eor = true
+		p.v4eor = true
 	}
 	if p.prefixes.V6EoR {
 		log.Printf("IPv6 End-of-Rib received from %s", p.ip)
-		p.eor = true
+		p.v6eor = true
 	}
 
 	p.mutex.RUnlock()
