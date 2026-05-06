@@ -154,7 +154,7 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			Ipv4Eor:                    p.v4eor,
 			Ipv6Eor:                    p.v6eor,
 			Name:                       peerName,
-			GrActive:                   PeerStatus(p.status.Load()) == StatusWaitingForEOR,
+			GrActive:                   PeerStatus(p.status.Load()) != StatusEstablished,
 		}
 		p.mutex.RUnlock()
 	}
