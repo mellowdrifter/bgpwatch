@@ -9,6 +9,7 @@ import (
 // PeerConfig holds the configuration for a single peer
 type PeerConfig struct {
 	IP       string `json:"ip"`
+	Name     string `json:"name,omitempty"`
 	Password string `json:"password,omitempty"`
 }
 

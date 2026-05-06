@@ -142,7 +142,8 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			duration = uint64(time.Since(p.establishedTime).Seconds())
 		}
 
-		peerStats[anonymizePeer(p.ip)] = &pb.PeerStats{
+		peerName := s.getPeerName(p)
+		peerStats[peerName] = &pb.PeerStats{
 			EstablishedDurationSeconds: duration,
 			TotalAdvertisements:        p.updates,
 			TotalWithdrawals:           p.withdraws,
@@ -152,6 +153,8 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			GracefulRestart:            p.param.GracefulRestart,
 			Ipv4Eor:                    p.v4eor,
 			Ipv6Eor:                    p.v6eor,
+			Name:                       peerName,
+			GrActive:                   PeerStatus(p.status.Load()) == StatusWaitingForEOR,
 		}
 		p.mutex.RUnlock()
 	}
@@ -656,6 +659,24 @@ func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
 func anonymizePeer(ip string) string {
 	hash := sha256.Sum256([]byte(ip))
 	return "peer-" + hex.EncodeToString(hash[:4])
+}
+
+func (s *Server) getPeerName(p *peer) string {
+	name := anonymizePeer(p.ip)
+
+	// Check config for an override name
+	if cfg, ok := s.Conf.PeersConfig[p.ip]; ok && cfg.Name != "" {
+		name = cfg.Name
+	}
+
+	// Handle multiple sessions from the same name by appending address family if separate
+	if p.v4rib != nil && p.v6rib == nil {
+		return name + "-v4"
+	}
+	if p.v6rib != nil && p.v4rib == nil {
+		return name + "-v6"
+	}
+	return name
 }
 
 func ciscoRegexpToGo(cisco string) string {

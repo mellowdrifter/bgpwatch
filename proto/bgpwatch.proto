@@ -82,6 +82,8 @@ message PeerStats {
   bool graceful_restart = 7;
   bool ipv4_eor = 8;
   bool ipv6_eor = 9;
+  string name = 10;
+  bool gr_active = 11;
 }
 
 message SystemStatsResponse {
