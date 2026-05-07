@@ -2,3 +2,4 @@ bgpwatch
 go.sum
 proto/*.pb.go
 docs/*.md
+.agent/skills/*.md

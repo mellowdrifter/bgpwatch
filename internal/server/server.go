@@ -33,6 +33,12 @@ type Server struct {
 	Conf          Config
 	grManager     GracefulRestartManager
 	grpcServer    *grpc.Server
+	peerStats     map[string]*persistentPeerStats
+}
+
+type persistentPeerStats struct {
+	flaps            uint32
+	lastNotification string
 }
 
 type Config struct {
@@ -61,6 +67,7 @@ func New(conf Config) *Server {
 		v6AttrTable:  routing_table.NewAttrTable(),
 		sampler:      procstats.NewSampler(30 * time.Second),
 		Conf:         conf,
+		peerStats:    make(map[string]*persistentPeerStats),
 	}
 	s.grManager = NewGracefulRestartManager(s)
 	return s
@@ -146,6 +153,12 @@ func (s *Server) clean() {
 		for _, p := range dead {
 			log.Printf("Holdtimer expired for %s", p.conn.RemoteAddr().String())
 			p.conn.Write(bgp.CreateNotification(bgp.HoldTimeExpired, 0))
+			s.mutex.Lock()
+			if _, ok := s.peerStats[p.ip]; !ok {
+				s.peerStats[p.ip] = &persistentPeerStats{}
+			}
+			s.peerStats[p.ip].lastNotification = "HOLD TIMER"
+			s.mutex.Unlock()
 			p.conn.Close()
 		}
 	}
@@ -204,6 +217,10 @@ func (s *Server) accept(conn net.Conn) *peer {
 
 			check.conn.Close()
 			s.peers = append(s.peers[:i], s.peers[i+1:]...)
+			if _, ok := s.peerStats[ip]; !ok {
+				s.peerStats[ip] = &persistentPeerStats{}
+			}
+			s.peerStats[ip].flaps++
 			break
 		}
 	}

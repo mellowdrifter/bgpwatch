@@ -22,6 +22,23 @@ const (
 	StatusPurgingRemainingStale
 )
 
+func (s PeerStatus) String() string {
+	switch s {
+	case StatusEstablished:
+		return "Established"
+	case StatusGRStale:
+		return "GR Stale"
+	case StatusWaitingForEOR:
+		return "Waiting for EoR"
+	case StatusPurging:
+		return "Purging"
+	case StatusPurgingRemainingStale:
+		return "Purging Remaining Stale"
+	default:
+		return "Unknown"
+	}
+}
+
 type Family struct {
 	AFI  uint16
 	SAFI uint8

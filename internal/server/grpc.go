@@ -123,13 +123,17 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range peers {
 		var pmem routing_table.MemoryStats
-		var attrCount uint64
+		var attrCount, pfxCount, pathCount uint64
 		if p.v4rib != nil {
 			pmem = p.v4rib.MemoryUsage()
 			attrCount = uint64(p.v4rib.AttributeCount())
+			pfxCount = uint64(p.v4rib.Count())
+			pathCount = uint64(p.v4rib.PathCount())
 		} else if p.v6rib != nil {
 			pmem = p.v6rib.MemoryUsage()
 			attrCount = uint64(p.v6rib.AttributeCount())
+			pfxCount = uint64(p.v6rib.Count())
+			pathCount = uint64(p.v6rib.PathCount())
 		}
 
 		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
@@ -143,7 +147,7 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 		}
 
 		peerName := s.getPeerName(p)
-		peerStats[peerName] = &pb.PeerStats{
+		stats := &pb.PeerStats{
 			EstablishedDurationSeconds: duration,
 			TotalAdvertisements:        p.updates,
 			TotalWithdrawals:           p.withdraws,
@@ -155,7 +159,22 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 			Ipv6Eor:                    p.v6eor,
 			Name:                       peerName,
 			GrActive:                   PeerStatus(p.status.Load()) != StatusEstablished,
+			MsgRecv:                    p.msgRecv,
+			InUpdates:                  p.inUpdates,
+			State:                      PeerStatus(p.status.Load()).String(),
+			PrefixCount:                pfxCount,
+			PathCount:                  pathCount,
 		}
+
+		// Add persistent stats
+		s.mutex.RLock()
+		if ps, ok := s.peerStats[p.ip]; ok {
+			stats.Flaps = ps.flaps
+			stats.LastNotification = ps.lastNotification
+		}
+		s.mutex.RUnlock()
+
+		peerStats[peerName] = stats
 		p.mutex.RUnlock()
 	}
 
@@ -168,6 +187,7 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 		HeapIdleBytes:        m.HeapIdle,
 		HeapReleasedBytes:    m.HeapReleased,
 		NumGc:                m.NumGC,
+		HeapObjects:          m.HeapObjects,
 		TotalPeerRibRamBytes: totalPeerRam,
 		PeerStats:            peerStats,
 		PssBytes:             uint64(ps.PSSBytes),

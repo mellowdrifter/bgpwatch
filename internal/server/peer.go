@@ -53,6 +53,8 @@ type peer struct {
 	staleSince       time.Time
 	restartTimer     *time.Timer
 	eorFallbackTimer *time.Timer
+	msgRecv          uint64
+	inUpdates        uint64
 }
 
 func (p *peer) peerWorker() {
@@ -70,6 +72,9 @@ func (p *peer) peerWorker() {
 			return
 		}
 		p.in = bytes.NewReader(msg)
+		p.mutex.Lock()
+		p.msgRecv++
+		p.mutex.Unlock()
 
 		header, err := p.getType()
 		if err != nil {
@@ -96,6 +101,9 @@ func (p *peer) peerWorker() {
 			p.conn.Write(bgp.CreateKeepAlive())
 
 		case bgp.Update:
+			p.mutex.Lock()
+			p.inUpdates++
+			p.mutex.Unlock()
 			if err := p.handleUpdate(); err != nil {
 				log.Printf("Error handling Update: %v\n", err)
 				p.conn.Close()
@@ -275,6 +283,12 @@ func (p *peer) handleNotification() error {
 		return fmt.Errorf("reading notification subcode: %w", err)
 	}
 	log.Printf("Notification received from %s: code %d, subcode %d\n", p.ip, code, subcode)
+	p.server.mutex.Lock()
+	if _, ok := p.server.peerStats[p.ip]; !ok {
+		p.server.peerStats[p.ip] = &persistentPeerStats{}
+	}
+	p.server.peerStats[p.ip].lastNotification = fmt.Sprintf("%d / %d", code, subcode)
+	p.server.mutex.Unlock()
 	return nil
 }
 

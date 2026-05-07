@@ -84,6 +84,13 @@ message PeerStats {
   bool ipv6_eor = 9;
   string name = 10;
   bool gr_active = 11;
+  string state = 12;
+  uint64 msg_recv = 13;
+  uint64 in_updates = 14;
+  uint32 flaps = 15;
+  string last_notification = 16;
+  uint64 prefix_count = 17;
+  uint64 path_count = 18;
 }
 
 message SystemStatsResponse {
@@ -97,6 +104,7 @@ message SystemStatsResponse {
   map<string, PeerStats> peer_stats = 8;
   uint64 pss_bytes = 9;
   uint64 rss_bytes = 10;
+  uint64 heap_objects = 11;
 }
 
 
