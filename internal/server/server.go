@@ -237,7 +237,11 @@ func (s *Server) accept(conn net.Conn) *peer {
 		v4rib:     oldV4Rib,
 		v6rib:     oldV6Rib,
 	}
-	peer.status.Store(oldStatus)
+	if oldStatus == uint32(StatusEstablished) && s.Conf.Eor {
+		peer.status.Store(uint32(StatusWaitingForEOR))
+	} else {
+		peer.status.Store(oldStatus)
+	}
 	peer.staleSince = oldStaleSince
 
 	s.peers = append(s.peers, peer)

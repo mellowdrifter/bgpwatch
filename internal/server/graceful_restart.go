@@ -104,11 +104,7 @@ func (m *defaultGRManager) ProcessCapExchange(ctx context.Context, peerIP string
 		return fmt.Errorf("peer not found: %s", peerIP)
 	}
 
-	if params.GRCapability == nil {
-		p.status.Store(uint32(StatusPurging))
-		return m.purgeAllStalePaths(ctx, p)
-	}
-
+	// Always initialize EoR map and stop existing timers if we are in this flow
 	m.mu.Lock()
 	m.eorReceived[peerIP] = make(map[Family]bool)
 	m.mu.Unlock()
@@ -118,11 +114,15 @@ func (m *defaultGRManager) ProcessCapExchange(ctx context.Context, peerIP string
 		p.restartTimer.Stop()
 		p.restartTimer = nil
 	}
-
-	// Cancel any existing fallback timer
 	if p.eorFallbackTimer != nil {
 		p.eorFallbackTimer.Stop()
 		p.eorFallbackTimer = nil
+	}
+
+	if params.GRCapability == nil && !p.weor {
+		p.status.Store(uint32(StatusPurging))
+		p.mutex.Unlock()
+		return m.purgeAllStalePaths(ctx, p)
 	}
 
 	p.status.Store(uint32(StatusWaitingForEOR))

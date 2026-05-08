@@ -23,6 +23,17 @@ var (
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	}
+
+	standardPool = sync.Pool{
+		New: func() interface{} {
+			return new([bgp.MaxMessage]byte)
+		},
+	}
+	extendedPool = sync.Pool{
+		New: func() interface{} {
+			return new([bgp.MaxExtendedMessage]byte)
+		},
+	}
 )
 
 type peer struct {
@@ -65,13 +76,18 @@ func (p *peer) peerWorker() {
 			maxLen = bgp.MaxExtendedMessage
 		}
 
-		msg, err := getMessage(p.conn, maxLen)
+		msg, stdBuf, extBuf, err := p.getMessage(maxLen)
 		if err != nil {
-			log.Printf("Bad BGP message: %v\n", err)
+			log.Printf("Bad BGP message from %s: %v\n", p.ip, err)
 			p.conn.Close()
 			return
 		}
-		p.in = bytes.NewReader(msg)
+
+		if p.in == nil {
+			p.in = bytes.NewReader(msg)
+		} else {
+			p.in.Reset(msg)
+		}
 		p.mutex.Lock()
 		p.msgRecv++
 		p.mutex.Unlock()
@@ -119,33 +135,63 @@ func (p *peer) peerWorker() {
 			return
 
 		default:
-			log.Printf("Unknown BGP message inbound: %d\n", header)
+			log.Printf("Unknown BGP message inbound from %s: %d\n", p.ip, header)
+		}
+
+		// Return buffer to pool after processing is complete and no references remain
+		if stdBuf != nil {
+			standardPool.Put(stdBuf)
+		} else if extBuf != nil {
+			extendedPool.Put(extBuf)
 		}
 	}
 }
 
-func getMessage(c net.Conn, maxLen uint16) ([]byte, error) {
-	header := make([]byte, 18)
-	if _, err := io.ReadFull(c, header); err != nil {
-		return nil, err
+func (p *peer) getMessage(maxLen uint16) ([]byte, *[bgp.MaxMessage]byte, *[bgp.MaxExtendedMessage]byte, error) {
+	stdBuf := standardPool.Get().(*[bgp.MaxMessage]byte)
+
+	// Read header (19 bytes: 16 marker, 2 length, 1 type)
+	if _, err := io.ReadFull(p.conn, stdBuf[:19]); err != nil {
+		standardPool.Put(stdBuf)
+		return nil, nil, nil, err
 	}
 
-	if !bytes.Equal(header[:16], bgpMarker) {
-		return nil, fmt.Errorf("packet is not a BGP packet")
+	// Validate marker
+	if !bytes.Equal(stdBuf[:16], bgpMarker) {
+		standardPool.Put(stdBuf)
+		return nil, nil, nil, fmt.Errorf("packet is not a BGP packet")
 	}
 
-	msgLen := int(binary.BigEndian.Uint16(header[16:]))
+	msgLen := int(binary.BigEndian.Uint16(stdBuf[16:18]))
 	if msgLen < bgp.MinMessage || msgLen > int(maxLen) {
-		return nil, fmt.Errorf("invalid BGP message length: %d (max: %d)", msgLen, maxLen)
+		standardPool.Put(stdBuf)
+		return nil, nil, nil, fmt.Errorf("invalid BGP message length: %d (max: %d)", msgLen, maxLen)
 	}
 
-	remLen := msgLen - 18
-	buffer := make([]byte, remLen)
-	if _, err := io.ReadFull(c, buffer); err != nil {
-		return nil, err
+	if msgLen <= bgp.MaxMessage {
+		// Read the rest of the message
+		if _, err := io.ReadFull(p.conn, stdBuf[19:msgLen]); err != nil {
+			standardPool.Put(stdBuf)
+			return nil, nil, nil, err
+		}
+		// Return slice starting at index 18 (Type byte) for compatibility with p.getType()
+		return stdBuf[18:msgLen], stdBuf, nil, nil
 	}
-	return buffer, nil
+
+	// Extended message handling
+	extBuf := extendedPool.Get().(*[bgp.MaxExtendedMessage]byte)
+	copy(extBuf[:19], stdBuf[:19])
+	standardPool.Put(stdBuf)
+
+	if _, err := io.ReadFull(p.conn, extBuf[19:msgLen]); err != nil {
+		extendedPool.Put(extBuf)
+		return nil, nil, nil, err
+	}
+	// Return slice starting at index 18 (Type byte)
+	return extBuf[18:msgLen], nil, extBuf, nil
 }
+
+// getMessage is deprecated, use p.getMessage()
 
 func (p *peer) getType() (uint8, error) {
 	var t uint8
