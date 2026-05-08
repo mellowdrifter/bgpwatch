@@ -304,7 +304,7 @@ func (g *grpcServer) performLookup(p *peer, addr string) (*routing_table.Route, 
 		prefix = prefix.Masked()
 
 		ip := prefix.Addr()
-		if !bogons.IsPublicIP(ip.AsSlice()) {
+		if !bogons.ValidPublicPrefix(prefix) {
 			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
 		}
 
@@ -322,7 +322,7 @@ func (g *grpcServer) performLookup(p *peer, addr string) (*routing_table.Route, 
 		return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
 	}
 
-	if !bogons.IsPublicIP(ip.AsSlice()) {
+	if !bogons.ValidPublicAddr(ip) {
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
 
@@ -344,7 +344,7 @@ func (g *grpcServer) performMultiLookup(p *peer, addr string) ([]routing_table.R
 		prefix = prefix.Masked()
 
 		ip := prefix.Addr()
-		if !bogons.IsPublicIP(ip.AsSlice()) {
+		if !bogons.ValidPublicPrefix(prefix) {
 			return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon prefix", addr)
 		}
 
@@ -362,7 +362,7 @@ func (g *grpcServer) performMultiLookup(p *peer, addr string) ([]routing_table.R
 		return nil, status.Errorf(codes.InvalidArgument, "invalid address %q: %v", addr, err)
 	}
 
-	if !bogons.IsPublicIP(ip.AsSlice()) {
+	if !bogons.ValidPublicAddr(ip) {
 		return nil, status.Errorf(codes.InvalidArgument, "%s is a bogon address", addr)
 	}
 
