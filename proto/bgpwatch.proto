@@ -147,4 +147,7 @@ service BGPWatch {
 
   // GetPrefixesByLargeCommunity returns all IPv4 and IPv6 routes matching the given large community.
   rpc GetPrefixesByLargeCommunity(LargeCommunityRequest) returns (RoutesResponse);
+
+  // GetInvalidPrefixes returns all IPv4 and IPv6 prefixes with local_pref = 50 (lightweight).
+  rpc GetInvalidPrefixes(OriginRequest) returns (PrefixesResponse);
 }
