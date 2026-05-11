@@ -32,3 +32,6 @@ fuzz:
 	go test -fuzz=FuzzDecodeMPReachNLRI -fuzztime 20s ./internal/bgp
 	go test -fuzz=FuzzDecodeMPUnreachNLRI -fuzztime 20s ./internal/bgp
 	go test -fuzz=FuzzDecodeOptionalParameters -fuzztime 20s ./internal/bgp
+
+gr-stress:
+	go test -v -tags=integration -run TestGracefulRestart_Randomized ./integration -count=5
