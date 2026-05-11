@@ -304,17 +304,13 @@ func (p *peer) HandleOpen() error {
 		p.v6rib = routing_table.NewIPv6Rib(p.server.v6AttrTable)
 	}
 
-	currentStatus := PeerStatus(p.status.Load())
-	if currentStatus == StatusGRStale || currentStatus == StatusWaitingForEOR {
-		// Transition to WaitingForEOR immediately so the EoR handler
-		// will trigger the purge even if ProcessCapExchange hasn't run yet.
-		p.status.Store(uint32(StatusWaitingForEOR))
-		go func() {
-			if err := p.server.grManager.ProcessCapExchange(context.Background(), p.ip, p.param); err != nil {
-				log.Printf("GR ProcessCapExchange error for %s: %v", p.ip, err)
-			}
-		}()
-	}
+	// All sessions transition to WaitingForEOR state during capability exchange
+	p.status.Store(uint32(StatusWaitingForEOR))
+	go func() {
+		if err := p.server.grManager.ProcessCapExchange(context.Background(), p.ip, p.param); err != nil {
+			log.Printf("GR ProcessCapExchange error for %s: %v", p.ip, err)
+		}
+	}()
 
 	return nil
 }

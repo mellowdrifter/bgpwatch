@@ -119,19 +119,13 @@ func (m *defaultGRManager) ProcessCapExchange(ctx context.Context, peerIP string
 		p.eorFallbackTimer = nil
 	}
 
-	if params.GRCapability == nil && !p.weor {
-		p.status.Store(uint32(StatusPurging))
-		p.mutex.Unlock()
-		return m.purgeAllStalePaths(ctx, p)
-	}
-
 	p.status.Store(uint32(StatusWaitingForEOR))
 
 	p.eorFallbackTimer = time.AfterFunc(m.fallbackDuration, func() {
 		if PeerStatus(p.status.Load()) == StatusWaitingForEOR {
-			p.status.Store(uint32(StatusPurgingRemainingStale))
-			log.Printf("EoR fallback timer expired for peer %s", peerIP)
-			_ = m.CompleteGracefulRestart(context.Background(), peerIP)
+			log.Printf("EoR fallback timer expired for peer %s, dropping connection and flushing routes", peerIP)
+			p.conn.Close()
+			m.server.destroyPeer(peerIP)
 		}
 	})
 	p.mutex.Unlock()
@@ -201,9 +195,8 @@ func (m *defaultGRManager) HandlePeerDown(ctx context.Context, peerIP string) er
 
 	p.restartTimer = time.AfterFunc(m.restartTime, func() {
 		if PeerStatus(p.status.Load()) == StatusGRStale {
-			p.status.Store(uint32(StatusPurging))
-			log.Printf("Restart timer expired for peer %s, purging stale routes", peerIP)
-			_ = m.CompleteGracefulRestart(context.Background(), peerIP)
+			log.Printf("Restart timer expired for peer %s, destroying RIB", peerIP)
+			m.server.destroyPeer(peerIP)
 		}
 	})
 	p.mutex.Unlock()

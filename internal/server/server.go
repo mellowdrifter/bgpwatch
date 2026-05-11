@@ -196,15 +196,12 @@ func (s *Server) accept(conn net.Conn) *peer {
 			oldV6Rib = check.v6rib
 			oldStatus = check.status.Load()
 			oldStaleSince = check.staleSince
-			isGR := check.param.GracefulRestart
 			check.v4rib = nil
 			check.v6rib = nil
 			check.mutex.Unlock()
 
-			// If old peer had GR enabled and wasn't already stale,
-			// mark the stolen RIBs as stale now (since old peer's remove()
-			// won't do it — it will see the peer is no longer in the list).
-			if isGR && PeerStatus(oldStatus) == StatusEstablished {
+			// If old peer wasn't already stale, mark the stolen RIBs as stale now.
+			if PeerStatus(oldStatus) == StatusEstablished {
 				if oldV4Rib != nil {
 					oldV4Rib.MarkAllStale()
 				}
@@ -237,11 +234,8 @@ func (s *Server) accept(conn net.Conn) *peer {
 		v4rib:     oldV4Rib,
 		v6rib:     oldV6Rib,
 	}
-	if oldStatus == uint32(StatusEstablished) && s.Conf.Eor {
-		peer.status.Store(uint32(StatusWaitingForEOR))
-	} else {
-		peer.status.Store(oldStatus)
-	}
+	// All new or restarting sessions start in Waiting for EoR state
+	peer.status.Store(uint32(StatusWaitingForEOR))
 	peer.staleSince = oldStaleSince
 
 	s.peers = append(s.peers, peer)
@@ -258,81 +252,35 @@ func (s *Server) accept(conn net.Conn) *peer {
 func (s *Server) remove(p *peer) {
 	p.conn.Close()
 
-	p.mutex.RLock()
-	isGR := p.param.GracefulRestart
-	p.mutex.RUnlock()
-
-	if isGR {
-		// Check if this peer is still in the peers list.
-		// If it was already replaced by accept() during reconnection,
-		// the new peer's HandleOpen will handle the GR transition.
-		s.mutex.RLock()
-		stillActive := false
-		for _, check := range s.peers {
-			if check == p {
-				stillActive = true
-				break
-			}
-		}
-		s.mutex.RUnlock()
-
-		if stillActive {
-			log.Printf("Peer %s disconnected, holding routes (Graceful Restart)\n", p.ip)
-			if p.v4rib != nil {
-				p.v4rib.MarkAllStale()
-			}
-			if p.v6rib != nil {
-				p.v6rib.MarkAllStale()
-			}
-			p.mutex.Lock()
-			p.staleSince = time.Now()
-			p.mutex.Unlock()
-			_ = s.grManager.HandlePeerDown(context.Background(), p.ip)
-			return
-		}
-		// Peer was replaced — the new peer has the RIBs, do nothing
-		log.Printf("Old peer %s was already replaced, skipping GR handling\n", p.ip)
-		return
-	}
-
-	log.Printf("Removing dead peer %s\n", p.conn.RemoteAddr().String())
-
-	s.mutex.Lock()
-	for i, check := range s.peers {
+	// Check if this peer is still in the peers list.
+	// If it was already replaced by accept() during reconnection,
+	// the new peer's HandleOpen will handle the GR transition.
+	s.mutex.RLock()
+	stillActive := false
+	for _, check := range s.peers {
 		if check == p {
-			s.peers = append(s.peers[:i], s.peers[i+1:]...)
+			stillActive = true
 			break
 		}
 	}
-	s.mutex.Unlock()
+	s.mutex.RUnlock()
 
-	// Clean up global refs and peer's memory
-	p.mutex.Lock()
-	var v4Prefixes []netip.Prefix
-	var v6Prefixes []netip.Prefix
-	if p.v4rib != nil {
-		v4Prefixes = p.v4rib.AllPrefixes()
-		p.v4rib = nil
+	if stillActive {
+		log.Printf("Peer %s disconnected, holding routes (Graceful Restart)\n", p.ip)
+		if p.v4rib != nil {
+			p.v4rib.MarkAllStale()
+		}
+		if p.v6rib != nil {
+			p.v6rib.MarkAllStale()
+		}
+		p.mutex.Lock()
+		p.staleSince = time.Now()
+		p.mutex.Unlock()
+		_ = s.grManager.HandlePeerDown(context.Background(), p.ip)
+		return
 	}
-	if p.v6rib != nil {
-		v6Prefixes = p.v6rib.AllPrefixes()
-		p.v6rib = nil
-	}
-	p.mutex.Unlock()
-
-	if len(v4Prefixes) > 0 {
-		s.removeGlobalV4(v4Prefixes)
-	}
-	if len(v6Prefixes) > 0 {
-		s.removeGlobalV6(v6Prefixes)
-	}
-
-	go func() {
-		time.Sleep(5 * time.Second)
-		log.Printf("Running FreeOSMemory after peer %s removal", p.ip)
-		debug.FreeOSMemory()
-		log.Printf("Memory cleanup complete after peer %s removal", p.ip)
-	}()
+	// Peer was replaced — the new peer has the RIBs, do nothing
+	log.Printf("Old peer %s was already replaced, skipping GR handling\n", p.ip)
 }
 
 func (s *Server) addGlobalV4(newPrefixes []netip.Prefix) {
@@ -382,5 +330,48 @@ func (s *Server) removeGlobalV6(removedPrefixes []netip.Prefix) {
 				delete(s.v6PrefixRefs, pfx)
 			}
 		}
+	}
+}
+func (s *Server) destroyPeer(ip string) {
+	s.mutex.Lock()
+	var deadPeer *peer
+	for i, check := range s.peers {
+		if check.ip == ip {
+			deadPeer = check
+			s.peers = append(s.peers[:i], s.peers[i+1:]...)
+			break
+		}
+	}
+	s.mutex.Unlock()
+
+	if deadPeer != nil {
+		log.Printf("Removing dead peer %s and destroying RIB\n", deadPeer.ip)
+
+		deadPeer.mutex.Lock()
+		var v4Prefixes []netip.Prefix
+		var v6Prefixes []netip.Prefix
+		if deadPeer.v4rib != nil {
+			v4Prefixes = deadPeer.v4rib.AllPrefixes()
+			deadPeer.v4rib = nil
+		}
+		if deadPeer.v6rib != nil {
+			v6Prefixes = deadPeer.v6rib.AllPrefixes()
+			deadPeer.v6rib = nil
+		}
+		deadPeer.mutex.Unlock()
+
+		if len(v4Prefixes) > 0 {
+			s.removeGlobalV4(v4Prefixes)
+		}
+		if len(v6Prefixes) > 0 {
+			s.removeGlobalV6(v6Prefixes)
+		}
+
+		go func() {
+			time.Sleep(5 * time.Second)
+			log.Printf("Running FreeOSMemory after peer %s removal", ip)
+			debug.FreeOSMemory()
+			log.Printf("Memory cleanup complete after peer %s removal", ip)
+		}()
 	}
 }
