@@ -66,6 +66,7 @@ type peer struct {
 	eorFallbackTimer *time.Timer
 	msgRecv          uint64
 	inUpdates        uint64
+	memCleanupOnce   sync.Once
 }
 
 func (p *peer) peerWorker() {
@@ -654,11 +655,13 @@ func (p *peer) processRibUpdates() {
 			}
 		}
 
-		go func() {
-			time.Sleep(15 * time.Second)
-			log.Printf("Running FreeOSMemory after EoR convergence for peer %s", p.ip)
-			debug.FreeOSMemory()
-			log.Printf("FreeOSMemory complete for peer %s", p.ip)
-		}()
+		p.memCleanupOnce.Do(func() {
+			go func() {
+				time.Sleep(15 * time.Second)
+				log.Printf("Running FreeOSMemory after EoR convergence for peer %s", p.ip)
+				debug.FreeOSMemory()
+				log.Printf("FreeOSMemory complete for peer %s", p.ip)
+			}()
+		})
 	}
 }

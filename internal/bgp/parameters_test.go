@@ -19,16 +19,21 @@ func TestDecodeOptionalParameters(t *testing.T) {
 				0x00, 0x78, 0x41, 0x04, 0x00, 0x00, 0xfc, 0x15, 0x46, 0x00, 0x47, 0x00,
 			},
 			want: Parameters{
-				ASN32:   [4]byte{0x00, 0x00, 0xfc, 0x15},
-				Refresh: true,
+				ASN32:           [4]byte{0x00, 0x00, 0xfc, 0x15},
+				Refresh:         true,
+				GracefulRestart: true,
+				GRCapability: &GracefulRestartCapability{
+					RestartFlags: 0,
+					RestartTime:  120,
+				},
 				AddrFamilies: []Addr{
 					Addr{
 						AFI:  1,
 						SAFI: 1,
 					},
 				},
-				Supported:   []uint8{1, 65, 70},
-				Unsupported: []uint8{2, 64, 71},
+				Supported:   []uint8{1, 64, 65, 70},
+				Unsupported: []uint8{2, 71},
 			},
 		},
 		{

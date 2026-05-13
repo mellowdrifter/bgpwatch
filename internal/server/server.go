@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/bgp"
@@ -34,6 +35,7 @@ type Server struct {
 	grManager     GracefulRestartManager
 	grpcServer    *grpc.Server
 	peerStats     map[string]*persistentPeerStats
+	cleanupPending atomic.Bool
 }
 
 type persistentPeerStats struct {
@@ -367,11 +369,14 @@ func (s *Server) destroyPeer(ip string) {
 			s.removeGlobalV6(v6Prefixes)
 		}
 
-		go func() {
-			time.Sleep(5 * time.Second)
-			log.Printf("Running FreeOSMemory after peer %s removal", ip)
-			debug.FreeOSMemory()
-			log.Printf("Memory cleanup complete after peer %s removal", ip)
-		}()
+		if s.cleanupPending.CompareAndSwap(false, true) {
+			go func() {
+				time.Sleep(5 * time.Second)
+				log.Printf("Running FreeOSMemory after peer %s removal", ip)
+				debug.FreeOSMemory()
+				s.cleanupPending.Store(false)
+				log.Printf("Memory cleanup complete after peer %s removal", ip)
+			}()
+		}
 	}
 }

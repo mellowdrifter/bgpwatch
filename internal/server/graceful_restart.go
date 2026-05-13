@@ -139,6 +139,10 @@ func (m *defaultGRManager) ReceiveEoR(ctx context.Context, peerIP string, family
 		return fmt.Errorf("peer not found: %s", peerIP)
 	}
 
+	if PeerStatus(p.status.Load()) != StatusWaitingForEOR {
+		return nil
+	}
+
 	m.mu.Lock()
 	if _, ok := m.eorReceived[peerIP]; !ok {
 		m.eorReceived[peerIP] = make(map[Family]bool)

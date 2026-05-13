@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"math/rand"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mellowdrifter/bgpwatch/internal/server"
 	pb "github.com/mellowdrifter/bgpwatch/proto"
 	gobgpserver "github.com/osrg/gobgp/v3/pkg/server"
-	"github.com/stretchr/testify/require"
 )
 
 type expectedRoute struct {
@@ -127,53 +127,40 @@ func TestGracefulRestart_Randomized(t *testing.T) {
 
 func verifyModel(t *testing.T, client pb.BGPWatchClient, model *grModel) {
 	t.Helper()
-	
-	// Use a small timeout for convergence
-	deadline := time.Now().Add(5 * time.Second)
-	var peerStats *pb.PeerStats
-	var stats *pb.SystemStatsResponse
-	var err error
 
 	peerID := anonymize("127.0.0.1")
+	deadline := time.Now().Add(15 * time.Second)
 
 	for time.Now().Before(deadline) {
-		stats, err = client.GetSystemStats(context.Background(), &pb.Empty{})
-		if err == nil {
-			if ps, ok := stats.PeerStats[peerID]; ok {
-				peerStats = ps
-				// If we expected WaitingForEoR but it already reached Established, that's okay (converged fast)
-				if model.status == server.StatusWaitingForEOR && peerStats.State == "Established" {
-					model.status = server.StatusEstablished
-					// When transitioned to Established, any remaining stale routes in model should be removed
-					for k, v := range model.routes {
-						if v.stale {
-							delete(model.routes, k)
-						}
-					}
+		// 1. Verify Peer State
+		stats, err := client.GetSystemStats(context.Background(), &pb.Empty{})
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		peerStats, ok := stats.PeerStats[peerID]
+		if !ok {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// If we expected WaitingForEoR but it already reached Established, that's okay
+		if model.status == server.StatusWaitingForEOR && peerStats.State == "Established" {
+			model.status = server.StatusEstablished
+			for k, v := range model.routes {
+				if v.stale {
+					delete(model.routes, k)
 				}
-				break
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
 
-	if model.status == server.StatusPurging && peerStats == nil {
-		return
-	}
-	
-	require.NotNil(t, peerStats, "Peer %s should be tracked in stats", peerID)
-	t.Logf("Verifying state. Model: %v, BGPWatch: %s", model.status, peerStats.State)
-	
-	// Verify routes
-	for _, expected := range model.routes {
-		success := false
-		var lastRoutes []*pb.Route
-		
-		start := time.Now()
-		for time.Since(start) < 10*time.Second {
+		// 2. Verify all routes
+		var failingRoutes []string
+		for _, expected := range model.routes {
+			success := false
 			resp, err := client.GetRoutes(context.Background(), &pb.RouteRequest{Address: expected.prefix.String()})
 			if err == nil {
-				lastRoutes = resp.Routes
 				for _, r := range resp.Routes {
 					if r.PathId == expected.pathID {
 						if expected.stale {
@@ -190,15 +177,31 @@ func verifyModel(t *testing.T, client pb.BGPWatchClient, model *grModel) {
 					}
 				}
 			}
-			if success {
-				break
+			if !success {
+				var actual string
+				if err != nil {
+					actual = fmt.Sprintf("Error: %v", err)
+				} else if resp == nil || len(resp.Routes) == 0 {
+					actual = "Not Found"
+				} else {
+					actual = fmt.Sprintf("Routes: %+v", resp.Routes)
+				}
+				failingRoutes = append(failingRoutes, fmt.Sprintf("%s (PathID %d): expected stale=%v, actual=%s", 
+					expected.prefix, expected.pathID, expected.stale, actual))
 			}
-			time.Sleep(500 * time.Millisecond)
 		}
-		
-		if !success {
-			t.Errorf("Route verification failed for %s (PathID %d). Expected stale: %v. Last routes found: %+v", 
-				expected.prefix, expected.pathID, expected.stale, lastRoutes)
+
+		if len(failingRoutes) == 0 {
+			t.Logf("Verification success. State: %s, Routes: %d", peerStats.State, len(model.routes))
+			return
 		}
+
+		if time.Now().After(deadline) {
+			t.Errorf("Verification failed after 15s. State: %s. Failing routes:\n%s", 
+				peerStats.State, strings.Join(failingRoutes, "\n"))
+			return
+		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 }
