@@ -194,12 +194,22 @@ func (s *Server) accept(conn net.Conn) *peer {
 	for i, check := range s.peers {
 		if ip == check.ip {
 			check.mutex.Lock()
+			if check.restartTimer != nil {
+				check.restartTimer.Stop()
+				check.restartTimer = nil
+			}
+			if check.eorFallbackTimer != nil {
+				check.eorFallbackTimer.Stop()
+				check.eorFallbackTimer = nil
+			}
 			oldV4Rib = check.v4rib
 			oldV6Rib = check.v6rib
 			oldStatus = check.status.Load()
 			oldStaleSince = check.staleSince
 			check.v4rib = nil
 			check.v6rib = nil
+			// Disarm stale status so any pending timer callback becomes a no-op
+			check.status.Store(uint32(StatusEstablished))
 			check.mutex.Unlock()
 
 			// If old peer wasn't already stale, mark the stolen RIBs as stale now.
@@ -350,6 +360,17 @@ func (s *Server) destroyPeer(ip string) {
 		log.Printf("Removing dead peer %s and destroying RIB\n", deadPeer.ip)
 
 		deadPeer.mutex.Lock()
+		if deadPeer.restartTimer != nil {
+			deadPeer.restartTimer.Stop()
+			deadPeer.restartTimer = nil
+		}
+		if deadPeer.eorFallbackTimer != nil {
+			deadPeer.eorFallbackTimer.Stop()
+			deadPeer.eorFallbackTimer = nil
+		}
+		if deadPeer.conn != nil {
+			_ = deadPeer.conn.Close()
+		}
 		var v4Prefixes []netip.Prefix
 		var v6Prefixes []netip.Prefix
 		if deadPeer.v4rib != nil {
