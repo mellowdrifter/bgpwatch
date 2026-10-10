@@ -1,12 +1,12 @@
 module github.com/mellowdrifter/bgpwatch
 
-go 1.26.2
+go 1.27.1
 
 require (
 	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.7.0
-	github.com/mellowdrifter/bogons v1.2.0
-	github.com/mellowdrifter/routing_table v0.0.0-20260506014832-4c4b423db1ab
+	github.com/mellowdrifter/bogons v1.4.1
+	github.com/mellowdrifter/routing_table v1.5.0
 	github.com/osrg/gobgp/v3 v3.37.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.48.0
@@ -41,5 +41,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/mellowdrifter/routing_table => ../routing_table
