@@ -6,7 +6,7 @@ require (
 	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.7.0
 	github.com/mellowdrifter/bogons v1.4.1
-	github.com/mellowdrifter/routing_table v1.5.0
+	github.com/mellowdrifter/routing_table v1.5.1
 	github.com/osrg/gobgp/v3 v3.37.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.48.0
