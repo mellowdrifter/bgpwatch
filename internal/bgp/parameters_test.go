@@ -8,9 +8,10 @@ import (
 
 func TestDecodeOptionalParameters(t *testing.T) {
 	tests := []struct {
-		desc  string
-		input []byte
-		want  Parameters
+		desc    string
+		input   []byte
+		want    Parameters
+		wantErr bool
 	}{
 		{
 			desc: "All capabilities under a single capability field",
@@ -55,9 +56,28 @@ func TestDecodeOptionalParameters(t *testing.T) {
 				Unsupported: []uint8{128, 2},
 			},
 		},
+		{
+			desc:    "Truncated parameter header declaring length but 0 payload bytes",
+			input:   []byte{0x02, 0x0a},
+			wantErr: true,
+		},
+		{
+			desc:    "Partially truncated parameter payload",
+			input:   []byte{0x02, 0x05, 0x01, 0x01},
+			wantErr: true,
+		},
 	}
 	for _, test := range tests {
-		got, _ := DecodeOptionalParameters(&test.input)
+		got, err := DecodeOptionalParameters(&test.input)
+		if test.wantErr {
+			if err == nil {
+				t.Errorf("Test (%s): expected error for truncated input, got nil", test.desc)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("Test (%s): unexpected error: %v", test.desc, err)
+		}
 
 		if !cmp.Equal(got, test.want) {
 			t.Errorf("Test (%s): got %+v, want %+v", test.desc, got, test.want)

@@ -122,22 +122,25 @@ func (s *Server) collectStats() *pb.SystemStatsResponse {
 	var totalPeerRam uint64
 	peerStats := make(map[string]*pb.PeerStats)
 	for _, p := range peers {
-		var pmem routing_table.MemoryStats
+		var peerRam uint64
 		var attrCount, pfxCount, pathCount uint64
 		if p.v4rib != nil {
-			pmem = p.v4rib.MemoryUsage()
-			attrCount = uint64(p.v4rib.AttributeCount())
-			pfxCount = uint64(p.v4rib.Count())
-			pathCount = uint64(p.v4rib.PathCount())
-		} else if p.v6rib != nil {
-			pmem = p.v6rib.MemoryUsage()
-			attrCount = uint64(p.v6rib.AttributeCount())
-			pfxCount = uint64(p.v6rib.Count())
-			pathCount = uint64(p.v6rib.PathCount())
+			pmem := p.v4rib.MemoryUsage()
+			peerRam += pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
+				pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
+			attrCount += uint64(p.v4rib.AttributeCount())
+			pfxCount += uint64(p.v4rib.Count())
+			pathCount += uint64(p.v4rib.PathCount())
+		}
+		if p.v6rib != nil {
+			pmem := p.v6rib.MemoryUsage()
+			peerRam += pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
+				pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
+			attrCount += uint64(p.v6rib.AttributeCount())
+			pfxCount += uint64(p.v6rib.Count())
+			pathCount += uint64(p.v6rib.PathCount())
 		}
 
-		peerRam := pmem.RoutingTablesEffective + pmem.RoutingTablesOverhead +
-			pmem.RouteAttributesEffective + pmem.RouteAttributesOverhead
 		totalPeerRam += peerRam
 
 		p.mutex.RLock()

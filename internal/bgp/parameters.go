@@ -8,9 +8,6 @@ import (
 )
 
 const (
-	// Open optional parameter types
-	capabilities = 2
-
 	// capability codes I support
 	capMpBgp           uint8 = 1
 	cap4Byte           uint8 = 65
@@ -103,10 +100,6 @@ func DecodeOptionalParameters(param *[]byte) (Parameters, error) {
 			}
 			return par, err
 		}
-		if r.Len() == 0 {
-			break
-		}
-
 		c := make([]byte, p.Length)
 		if _, err := io.ReadFull(r, c); err != nil {
 			return par, err

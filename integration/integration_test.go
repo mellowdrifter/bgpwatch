@@ -147,7 +147,7 @@ func TestGetMasks(t *testing.T) {
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
 
 	announceIPv4(t, gobgp, "8.8.8.0", 24, "10.0.0.1", []uint32{64500, 15169})
-	announceIPv4(t, gobgp, "10.0.0.0", 8, "10.0.0.1", []uint32{64500, 1234})
+	announceIPv4(t, gobgp, "11.0.0.0", 8, "10.0.0.1", []uint32{64500, 1234})
 	announceIPv4(t, gobgp, "172.16.0.0", 16, "10.0.0.1", []uint32{64500, 5678})
 
 	client := grpcClient(t, grpcPort)
@@ -290,11 +290,11 @@ func TestAsPathRegexRealistic(t *testing.T) {
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
 
 	// 1. Long AS path
-	announceIPv4(t, gobgp, "10.1.1.0", 24, "10.0.0.1", []uint32{100, 200, 300, 400, 500})
+	announceIPv4(t, gobgp, "20.1.1.0", 24, "10.0.0.1", []uint32{100, 200, 300, 400, 500})
 	// 2. Prepended path
-	announceIPv4(t, gobgp, "10.1.2.0", 24, "10.0.0.1", []uint32{100, 100, 100})
+	announceIPv4(t, gobgp, "20.1.2.0", 24, "10.0.0.1", []uint32{100, 100, 100})
 	// 3. Locally originated (empty path)
-	announceIPv4(t, gobgp, "10.1.3.0", 24, "10.0.0.1", []uint32{})
+	announceIPv4(t, gobgp, "20.1.3.0", 24, "10.0.0.1", []uint32{})
 
 	client := grpcClient(t, grpcPort)
 	// GoBGP prepends 64500
@@ -404,11 +404,11 @@ func TestCommunitySearch(t *testing.T) {
 	client := grpcClient(t, grpcPort)
 
 	// 1. Standard community
-	announceIPv4WithCommunities(t, gobgp, "10.2.1.0", 24, "10.0.0.1", []uint32{100}, []uint32{64500<<16 | 123})
+	announceIPv4WithCommunities(t, gobgp, "20.2.1.0", 24, "10.0.0.1", []uint32{100}, []uint32{64500<<16 | 123})
 
 	// 2. Large community
 	lc := &api.LargeCommunity{GlobalAdmin: 64500, LocalData1: 1, LocalData2: 2}
-	announceIPv4WithLargeCommunities(t, gobgp, "10.2.2.0", 24, "10.0.0.1", []uint32{100}, []*api.LargeCommunity{lc})
+	announceIPv4WithLargeCommunities(t, gobgp, "20.2.2.0", 24, "10.0.0.1", []uint32{100}, []*api.LargeCommunity{lc})
 
 	waitForConvergence(t, func() bool {
 		resp, err := client.GetTotals(context.Background(), &pb.Empty{})
@@ -421,7 +421,7 @@ func TestCommunitySearch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, commResp.Routes, 1)
-	require.Equal(t, "10.2.1.0/24", commResp.Routes[0].Prefix)
+	require.Equal(t, "20.2.1.0/24", commResp.Routes[0].Prefix)
 
 	// Test large community lookup
 	lcommResp, err := client.GetPrefixesByLargeCommunity(context.Background(), &pb.LargeCommunityRequest{
@@ -429,7 +429,7 @@ func TestCommunitySearch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, lcommResp.Routes, 1)
-	require.Equal(t, "10.2.2.0/24", lcommResp.Routes[0].Prefix)
+	require.Equal(t, "20.2.2.0/24", lcommResp.Routes[0].Prefix)
 }
 
 func TestUnknownAttributes(t *testing.T) {
@@ -464,13 +464,13 @@ func TestPeerFlapRIB(t *testing.T) {
 	defer stop()
 
 	// 1. First session
-	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
+	gobgp, stopGoBGP := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, true)
 	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
 
 	client := grpcClient(t, grpcPort)
 
 	for i := 1; i <= 10; i++ {
-		announceIPv4(t, gobgp, fmt.Sprintf("10.4.%d.0", i), 24, "10.0.0.1", []uint32{100})
+		announceIPv4(t, gobgp, fmt.Sprintf("20.4.%d.0", i), 24, "10.0.0.1", []uint32{100})
 	}
 
 	waitForConvergence(t, func() bool {
@@ -478,20 +478,20 @@ func TestPeerFlapRIB(t *testing.T) {
 		return err == nil && resp.Ipv4Count == 10
 	}, 10*time.Second)
 
-	// 2. Flap
+	// 2. Flap - routes should be held as stale (looking glass resilience)
 	stopGoBGP()
 
 	waitForConvergence(t, func() bool {
-		resp, err := client.GetTotals(context.Background(), &pb.Empty{})
-		return err == nil && resp.Ipv4Count == 0
+		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: "20.4.1.0/24"})
+		return err == nil && resp.Found && resp.Route.StaleSeconds > 0
 	}, 10*time.Second)
 
-	// 3. Second session
-	gobgp2, stopGoBGP2 := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
+	// 3. Second session - reconnect and announce only 1 prefix; old stale routes purged on EoR
+	gobgp2, stopGoBGP2 := startGoBGP(t, 64500, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, true)
 	defer stopGoBGP2()
 	waitForSession(t, gobgp2, "127.0.0.1", 10*time.Second)
 
-	announceIPv4(t, gobgp2, "10.4.1.0", 24, "10.0.0.1", []uint32{100})
+	announceIPv4(t, gobgp2, "20.4.1.0", 24, "10.0.0.1", []uint32{100})
 
 	waitForConvergence(t, func() bool {
 		resp, err := client.GetTotals(context.Background(), &pb.Empty{})
@@ -518,7 +518,7 @@ func TestFullTablePerformance(t *testing.T) {
 	for i := 0; i < count; i++ {
 		b2 := (i / 256)
 		b3 := (i % 256)
-		prefix := fmt.Sprintf("10.%d.%d.0", 100+b2, b3)
+		prefix := fmt.Sprintf("20.%d.%d.0", 100+b2, b3)
 		announceIPv4(t, gobgp, prefix, 24, "10.0.0.1", []uint32{100, 200, 300})
 	}
 	t.Logf("Sent %d prefixes in %v", count, time.Since(start))

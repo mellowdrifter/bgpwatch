@@ -39,19 +39,6 @@ const (
 
 type BGPID [4]byte
 
-type msgOpen struct {
-	Version  uint8
-	ASN      uint16
-	HoldTime uint16
-	BGPID    [4]byte
-	ParamLen uint8
-}
-
-type msgNotification struct {
-	Code    uint8
-	Subcode uint8
-}
-
 // CreateKeepAlive creates a BGP KEEPALIVE message.
 func CreateKeepAlive() []byte {
 	var b bytes.Buffer
