@@ -846,3 +846,82 @@ func TestBestPathFlipOnWithdrawal(t *testing.T) {
 	require.Equal(t, uint32(100), resp.Route.LocalPref)
 }
 
+func TestGetInvalidPrefixes(t *testing.T) {
+	t.Log("Testing GetInvalidPrefixes RPC with live BGP peering")
+	bgpPort, grpcPort := portPair(25)
+	stopBW := startBGPWatch(t, bgpPort, grpcPort, false)
+	defer stopBW()
+
+	gobgp, stopGoBGP := startGoBGP(t, 64533, "10.0.0.1", "127.0.0.1", 64533, bgpPort, false, false)
+	defer stopGoBGP()
+
+	waitForSession(t, gobgp, "127.0.0.1", 10*time.Second)
+
+	// Announce invalid prefix from AS15169 (LocalPref = 50)
+	announceIPv4WithAttributes(t, gobgp, "20.10.1.0", 24, "10.0.0.1", []uint32{15169}, 0, 50)
+	// Announce valid prefix from AS15169 (LocalPref = 100)
+	announceIPv4WithAttributes(t, gobgp, "20.10.2.0", 24, "10.0.0.1", []uint32{15169}, 0, 100)
+	// Announce invalid prefix from AS13335 (LocalPref = 50)
+	announceIPv4WithAttributes(t, gobgp, "20.10.3.0", 24, "10.0.0.1", []uint32{13335}, 0, 50)
+
+	client := grpcClient(t, grpcPort)
+
+	// Wait for routes to arrive
+	waitForConvergence(t, func() bool {
+		resp, err := client.GetTotals(context.Background(), &pb.Empty{})
+		return err == nil && resp.Ipv4Count >= 3
+	}, 10*time.Second)
+
+	ctx := context.Background()
+
+	// 1. Global invalid prefixes query (Asn: 0)
+	t.Run("Global Query", func(t *testing.T) {
+		resp, err := client.GetInvalidPrefixes(ctx, &pb.OriginRequest{Asn: 0})
+		require.NoError(t, err)
+
+		var prefixes []string
+		for _, p := range resp.GetPrefixes() {
+			prefixes = append(prefixes, p.GetPrefix())
+		}
+		require.ElementsMatch(t, []string{"20.10.1.0/24", "20.10.3.0/24"}, prefixes)
+	})
+
+	// 2. Scoped by Origin ASN 15169
+	t.Run("Scoped to Origin ASN 15169", func(t *testing.T) {
+		resp, err := client.GetInvalidPrefixes(ctx, &pb.OriginRequest{Asn: 15169})
+		require.NoError(t, err)
+
+		var prefixes []string
+		for _, p := range resp.GetPrefixes() {
+			prefixes = append(prefixes, p.GetPrefix())
+		}
+		require.Equal(t, []string{"20.10.1.0/24"}, prefixes)
+	})
+
+	// 3. Scoped by Origin ASN 13335
+	t.Run("Scoped to Origin ASN 13335", func(t *testing.T) {
+		resp, err := client.GetInvalidPrefixes(ctx, &pb.OriginRequest{Asn: 13335})
+		require.NoError(t, err)
+
+		var prefixes []string
+		for _, p := range resp.GetPrefixes() {
+			prefixes = append(prefixes, p.GetPrefix())
+		}
+		require.Equal(t, []string{"20.10.3.0/24"}, prefixes)
+	})
+
+	// 4. Scoped by Origin ASN with no invalid prefixes
+	t.Run("Scoped to Origin ASN without invalids", func(t *testing.T) {
+		resp, err := client.GetInvalidPrefixes(ctx, &pb.OriginRequest{Asn: 36692})
+		require.NoError(t, err)
+		require.Empty(t, resp.GetPrefixes())
+	})
+
+	// 5. Bogon ASN validation
+	t.Run("Bogon ASN Rejection", func(t *testing.T) {
+		_, err := client.GetInvalidPrefixes(ctx, &pb.OriginRequest{Asn: 64512})
+		require.Error(t, err)
+	})
+}
+
+

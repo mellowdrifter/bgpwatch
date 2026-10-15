@@ -654,6 +654,105 @@ func (g *grpcServer) GetPrefixesByLargeCommunity(ctx context.Context, in *pb.Lar
 	}, nil
 }
 
+// GetInvalidPrefixes returns all IPv4 and IPv6 prefixes with local_pref = 50 (lightweight).
+// If in.GetAsn() > 0, it filters by origin ASN; if in.GetAsn() == 0, it returns all invalid prefixes.
+func (g *grpcServer) GetInvalidPrefixes(ctx context.Context, in *pb.OriginRequest) (*pb.PrefixesResponse, error) {
+	if err := g.checkReady(); err != nil {
+		return nil, err
+	}
+
+	var asn uint32
+	if in != nil {
+		asn = in.GetAsn()
+	}
+
+	if asn > 0 && !bogons.ValidPublicASN(asn) {
+		return nil, status.Errorf(codes.InvalidArgument, "AS%d is not a valid public ASN", asn)
+	}
+
+	peers := g.snapshotPeers()
+	seen := make(map[netip.Prefix]struct{})
+	results := make([]*pb.Prefix, 0)
+
+	if asn > 0 {
+		for _, p := range peers {
+			if p.v4rib != nil {
+				for _, r := range p.v4rib.PrefixesByOriginASN(asn) {
+					if r.Attributes != nil && r.Attributes.LocalPref == 50 {
+						if _, ok := seen[r.Prefix]; !ok {
+							seen[r.Prefix] = struct{}{}
+							results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+						}
+					}
+				}
+			}
+			if p.v6rib != nil {
+				for _, r := range p.v6rib.PrefixesByOriginASN(asn) {
+					if r.Attributes != nil && r.Attributes.LocalPref == 50 {
+						if _, ok := seen[r.Prefix]; !ok {
+							seen[r.Prefix] = struct{}{}
+							results = append(results, &pb.Prefix{Prefix: r.Prefix.String()})
+						}
+					}
+				}
+			}
+		}
+		return &pb.PrefixesResponse{Prefixes: results}, nil
+	}
+
+	for _, p := range peers {
+		p.mutex.RLock()
+		hasAddPath := len(p.param.AddPath) > 0
+		p.mutex.RUnlock()
+
+		if p.v4rib != nil {
+			for _, pfx := range p.v4rib.AllPrefixes() {
+				if _, ok := seen[pfx]; ok {
+					continue
+				}
+				if r := p.v4rib.Lookup(pfx); r != nil && r.Attributes != nil && r.Attributes.LocalPref == 50 {
+					seen[pfx] = struct{}{}
+					results = append(results, &pb.Prefix{Prefix: pfx.String()})
+					continue
+				}
+				if hasAddPath {
+					for _, path := range p.v4rib.AllPaths(pfx) {
+						if path.Attributes != nil && path.Attributes.LocalPref == 50 {
+							seen[pfx] = struct{}{}
+							results = append(results, &pb.Prefix{Prefix: pfx.String()})
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if p.v6rib != nil {
+			for _, pfx := range p.v6rib.AllPrefixes() {
+				if _, ok := seen[pfx]; ok {
+					continue
+				}
+				if r := p.v6rib.Lookup(pfx); r != nil && r.Attributes != nil && r.Attributes.LocalPref == 50 {
+					seen[pfx] = struct{}{}
+					results = append(results, &pb.Prefix{Prefix: pfx.String()})
+					continue
+				}
+				if hasAddPath {
+					for _, path := range p.v6rib.AllPaths(pfx) {
+						if path.Attributes != nil && path.Attributes.LocalPref == 50 {
+							seen[pfx] = struct{}{}
+							results = append(results, &pb.Prefix{Prefix: pfx.String()})
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return &pb.PrefixesResponse{Prefixes: results}, nil
+}
+
 func (g *grpcServer) isBetter(curr, best routing_table.Route) bool {
 	lp1 := curr.Attributes.LocalPref
 	if lp1 == 0 {
