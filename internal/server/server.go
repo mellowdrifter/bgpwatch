@@ -138,31 +138,41 @@ func GetRid(srid string) (bgp.BGPID, error) {
 func (s *Server) clean() {
 	ticker := time.NewTicker(30 * time.Second)
 	for range ticker.C {
-		s.mutex.RLock()
-		now := time.Now()
-		var dead []*peer
-		for _, p := range s.peers {
-			p.mutex.RLock()
-			if p.holdtime > 0 && !p.lastKeepalive.IsZero() {
-				if now.Sub(p.lastKeepalive) > time.Duration(p.holdtime)*time.Second {
-					dead = append(dead, p)
-				}
-			}
-			p.mutex.RUnlock()
-		}
-		s.mutex.RUnlock()
+		s.cleanOnce()
+	}
+}
 
-		for _, p := range dead {
-			log.Printf("Holdtimer expired for %s", p.conn.RemoteAddr().String())
-			p.conn.Write(bgp.CreateNotification(bgp.HoldTimeExpired, 0))
-			s.mutex.Lock()
-			if _, ok := s.peerStats[p.ip]; !ok {
-				s.peerStats[p.ip] = &persistentPeerStats{}
-			}
-			s.peerStats[p.ip].lastNotification = "HOLD TIMER"
-			s.mutex.Unlock()
-			p.conn.Close()
+func (s *Server) cleanOnce() {
+	s.mutex.RLock()
+	now := time.Now()
+	var dead []*peer
+	for _, p := range s.peers {
+		p.mutex.RLock()
+		// Skip peers already disconnected and held in GR_STALE; their old
+		// lastKeepalive would otherwise trigger a bogus hold timer every pass.
+		if p.conn == nil || PeerStatus(p.status.Load()) == StatusGRStale {
+			p.mutex.RUnlock()
+			continue
 		}
+		if p.holdtime > 0 && !p.lastKeepalive.IsZero() {
+			if now.Sub(p.lastKeepalive) > time.Duration(p.holdtime)*time.Second {
+				dead = append(dead, p)
+			}
+		}
+		p.mutex.RUnlock()
+	}
+	s.mutex.RUnlock()
+
+	for _, p := range dead {
+		log.Printf("Holdtimer expired for %s", p.conn.RemoteAddr().String())
+		p.conn.Write(bgp.CreateNotification(bgp.HoldTimeExpired, 0))
+		s.mutex.Lock()
+		if _, ok := s.peerStats[p.ip]; !ok {
+			s.peerStats[p.ip] = &persistentPeerStats{}
+		}
+		s.peerStats[p.ip].lastNotification = "HOLD TIMER"
+		s.mutex.Unlock()
+		p.conn.Close()
 	}
 }
 
@@ -261,6 +271,10 @@ func (s *Server) accept(conn net.Conn) *peer {
 }
 
 // remove removes a client from the current list of clients being served.
+//
+// Routes are held (marked stale) on ANY disconnect, whether or not the peer negotiated
+// Graceful Restart. This is intentional: bgpwatch backs a looking glass, and collectors
+// are rebooted often, so their routes are kept until a brand new session resyncs.
 func (s *Server) remove(p *peer) {
 	p.conn.Close()
 

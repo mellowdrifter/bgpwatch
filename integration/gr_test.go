@@ -20,8 +20,12 @@ func anonymize(ip string) string {
 	return "peer-" + hex.EncodeToString(hash[:4])
 }
 
-// TestGracefulRestart1_Negotiation verifies that GR capability is correctly parsed and active.
-// Also verifies that a peer without GR results in immediate purge.
+// TestGracefulRestart1_Negotiation verifies that GR capability is correctly parsed and reported.
+//
+// It also verifies that a peer WITHOUT the GR capability has its routes held (marked stale)
+// when its session drops, exactly like a GR peer. This is intentional: bgpwatch backs a
+// looking glass whose collectors are rebooted often, so routes are kept until a brand new
+// session resyncs, whether or not the collector negotiated Graceful Restart.
 func TestGracefulRestart1_Negotiation(t *testing.T) {
 	t.Log("Test 1: Baseline GR negotiation")
 
@@ -59,7 +63,7 @@ func TestGracefulRestart1_Negotiation(t *testing.T) {
 	require.Contains(t, stats.PeerStats, peerID2)
 	require.False(t, stats.PeerStats[peerID2].GracefulRestart, "GR should NOT be active for peer 2")
 
-	// Verify purge behavior
+	// Verify hold behavior: even without GR negotiated, routes are kept on session drop.
 	prefix2 := "2.2.2.0"
 	announceIPv4(t, gobgp2, prefix2, 24, "10.0.0.2", []uint32{64501})
 	waitForConvergence(t, func() bool {
@@ -70,11 +74,12 @@ func TestGracefulRestart1_Negotiation(t *testing.T) {
 	t.Log("Dropping non-GR session...")
 	stopGoBGP2()
 
+	// Looking-glass design: routes must be held and marked stale, NOT purged.
 	waitForConvergence(t, func() bool {
 		resp, err := client.GetRoute(context.Background(), &pb.RouteRequest{Address: prefix2 + "/24"})
-		return err == nil && !resp.Found
+		return err == nil && resp.Found && resp.Route.StaleSeconds > 0
 	}, 30*time.Second)
-	t.Log("Success: Non-GR peer routes purged immediately")
+	t.Log("Success: Non-GR peer routes held and marked stale (by design)")
 }
 
 // TestGracefulRestart2_HoldOnDrop verifies that routes are held and marked stale on session drop.

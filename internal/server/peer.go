@@ -71,6 +71,10 @@ type peer struct {
 
 func (p *peer) peerWorker() {
 	defer p.server.remove(p)
+	// done stops the keepalive sender when this worker exits.
+	done := make(chan struct{})
+	defer close(done)
+	keepaliveStarted := false
 	for {
 		maxLen := uint16(bgp.MaxMessage)
 		if p.param.ExtendedMessage {
@@ -108,6 +112,10 @@ func (p *peer) peerWorker() {
 				return
 			}
 			p.conn.Write(bgp.CreateOpen(p.server.Conf.Asn, p.holdtime, p.rid, &p.param))
+			if !keepaliveStarted {
+				keepaliveStarted = true
+				go p.sendKeepalives(done)
+			}
 
 		case bgp.Keepalive:
 			if err := p.HandleKeepalive(); err != nil {
@@ -144,6 +152,32 @@ func (p *peer) peerWorker() {
 			standardPool.Put(stdBuf)
 		} else if extBuf != nil {
 			extendedPool.Put(extBuf)
+		}
+	}
+}
+
+// sendKeepalives sends a KEEPALIVE every holdtime/3 until done is closed.
+//
+// bgpwatch advertises no hold time of its own: the OPEN reply echoes the peer's value, so
+// the negotiated hold time (the lower of both sides, RFC 4271) is the peer's. A hold time
+// of 0 means no keepalives are used. Without this sender the only keepalives we sent were
+// replies to received ones, so a peer streaming a full table (updates, no keepalives)
+// would see our hold timer expire and drop the session.
+func (p *peer) sendKeepalives(done <-chan struct{}) {
+	interval := time.Duration(p.holdtime) * time.Second / 3
+	if interval <= 0 {
+		return
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			if _, err := p.conn.Write(bgp.CreateKeepAlive()); err != nil {
+				return
+			}
 		}
 	}
 }
